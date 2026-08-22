@@ -1,0 +1,29 @@
+# 本地密钥与机器配置
+.env
+.env.*
+!.env.example
+
+# Python 环境、缓存与测试产物
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 本地运行状态与日志
+data/*.json
+logs/
+*.log
+
+# 编辑器与操作系统临时文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.swp

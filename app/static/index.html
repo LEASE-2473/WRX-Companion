@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>温柔乡 · Voice Agent</title><link rel="stylesheet" href="/static/styles.css"></head>
+<body>
+<main>
+  <header class="app-header">
+    <div><span class="eyebrow">WRX · VOICE COMPANION</span><h1>温柔乡 <small id="mode"></small></h1></div>
+    <nav class="manager-nav" aria-label="配置管理">
+      <button class="manager-button" data-open-panel="promptPanel"><span class="manager-icon">P</span><span><strong>Preset</strong><small>提示词编排</small></span></button>
+      <button class="manager-button" data-open-panel="lorebookPanel"><span class="manager-icon">L</span><span><strong>Lorebook</strong><small>世界书管理</small></span></button>
+      <button class="manager-button" data-open-panel="providerPanel"><span class="manager-icon">◈</span><span><strong>Provider</strong><small>模型与语音</small></span></button>
+    </nav>
+  </header>
+  <section class="panel control-panel">
+    <div class="section-heading"><div><span class="section-kicker">PUSH TO TALK</span><h2>和她说点什么</h2></div><span id="status" class="status-pill">Idle</span></div>
+    <div class="hotkey-row"><label>按住说话热键<input id="keyInput" readonly placeholder="点击录制后按下目标键"></label><div class="button-row"><button id="captureKey">录制按键</button><button id="saveKey">保存</button></div></div>
+    <span id="keyState" class="hint"></span><button id="talk" class="talk">按住说话</button>
+  </section>
+  <section class="panel playback-panel"><div class="section-heading"><div><span class="section-kicker">PLAYBACK</span><h2>语音播放</h2></div><span id="playbackTime">0:00 / 0:00</span></div><input id="playback" type="range" min="0" max="100" value="0" step="0.1" aria-label="播放进度"><div class="button-row"><button id="playPause">播放</button><button id="stopAudio">中断</button></div></section>
+  <section class="panel latency-panel"><div class="section-heading"><div><span class="section-kicker">LATEST TURN</span><h2>本轮响应</h2></div></div><div id="latencyInfo" class="latency-grid">尚无数据</div></section>
+  <section class="panel conversation-panel">
+    <div class="section-heading"><div><span class="section-kicker">CONVERSATION</span><h2>对话</h2></div><button id="toggleConversation" class="subtle-button" hidden>展开全部</button></div>
+    <div class="conversation-controls"><label>本地对话<select id="conversationSelect"></select></label><div class="button-row"><button id="newConversation">新建</button><button id="saveConversation">保存</button><button id="clearConversation" class="danger-button">清空</button></div></div>
+    <span id="conversationState" class="hint"></span><div id="chat"></div><div class="conversation-summary"><span id="conversationSummary"></span></div>
+  </section>
+  <section class="panel compact-debug"><button id="showLlmDebug" disabled>查看上下文调试</button></section>
+  <details id="contextSettingsPanel" class="panel settings-panel"><summary><span><span class="section-kicker">CONTEXT</span><strong>上下文设置</strong></span><span class="summary-action">展开设置</span></summary><div class="details-body"><p class="hint">1 层等于 1 条旧 user 或 assistant 消息；当前 user 始终额外保留，本地对话不会被裁掉。</p><div class="inline-settings"><label>旧历史消息层数<input id="historyDepth" type="number" min="0" step="1" value="20"></label><button id="saveHistoryDepth">保存并从下一轮生效</button></div><span id="historyDepthState" class="hint"></span></div></details>
+</main>
+<dialog id="promptPanel" class="manager-dialog prompt-panel">
+  <div class="dialog-header"><div><span class="section-kicker">PROMPT ORCHESTRATION</span><h2>Preset Manager</h2></div><button class="dialog-close" data-close-panel="promptPanel" aria-label="关闭 Preset Manager">关闭</button></div>
+  <div class="dialog-scroll"><p class="hint">Preset 是最终 Prompt 的编排控制器。切换从下一轮生效；拖动改变 Relative 顺序，In-Chat 位置由 Depth / Role / Order 决定。条目默认折叠。</p>
+    <div class="manager-primary"><label>当前 Preset<select id="promptPreset"></select></label><label>名称<input id="promptPresetName"></label></div>
+    <div class="button-row"><button id="newPromptPreset">新建</button><button id="copyPromptPreset">复制</button><button id="savePromptPreset" class="primary-button">保存</button><button id="deletePromptPreset" class="danger-button">删除</button><button id="restorePrompts">恢复 WRX 最小默认</button><button id="importPromptPreset">导入 JSON</button><button id="exportPromptPreset">导出 JSON</button></div>
+    <input id="promptImportFile" type="file" accept="application/json,.json" hidden>
+    <div class="prompt-toolbar"><button id="addPromptEntry">新增普通条目</button><label>新增 Marker<select id="markerToAdd"><option value="worldInfoBefore">worldInfoBefore</option><option value="charDefinitions">charDefinitions</option><option value="worldInfoAfter">worldInfoAfter</option><option value="userDefinitions">userDefinitions</option><option value="chatHistory">chatHistory</option></select></label><button id="addMarkerEntry">添加 Marker</button><strong id="promptTokenTotal">静态估算 ≈ 0 tokens</strong></div>
+    <span id="promptState" class="hint">当前显示内容已保存，将用于下一轮</span><div id="promptEntries" class="prompt-entry-list"></div>
+  </div>
+</dialog>
+<dialog id="lorebookPanel" class="manager-dialog lorebook-panel">
+  <div class="dialog-header"><div><span class="section-kicker">WORLD & MEMORY</span><h2>Lorebook Manager</h2></div><button class="dialog-close" data-close-panel="lorebookPanel" aria-label="关闭 Lorebook Manager">关闭</button></div>
+  <div class="dialog-scroll"><p class="hint">角色卡和 Persona 使用 char / user 分类。常驻或关键词命中才激活，最终出口还受当前 Preset Marker 控制。条目默认折叠。</p>
+    <div class="manager-primary"><label>当前 Lorebook<select id="lorebookSelect"></select></label><label>名称<input id="lorebookName"></label></div>
+    <div class="button-row"><button id="newLorebook">新建</button><button id="copyLorebook">复制</button><button id="saveLorebook" class="primary-button">保存</button><button id="deleteLorebook" class="danger-button">删除</button><button id="importLorebook">导入 JSON</button><button id="exportLorebook">导出 JSON</button></div>
+    <input id="lorebookImportFile" type="file" accept="application/json,.json" hidden>
+    <div class="prompt-toolbar"><button id="addLoreEntry">新增条目</button><strong id="lorebookTokenTotal">静态估算 ≈ 0 tokens</strong></div>
+    <span id="lorebookState" class="hint">当前服务端 Lorebook 已载入，将用于下一轮</span><div id="lorebookActivationSummary" class="hint">尚无本轮激活记录</div><div id="lorebookEntries" class="prompt-entry-list"></div>
+  </div>
+</dialog>
+<dialog id="providerPanel" class="manager-dialog provider-panel">
+  <div class="dialog-header"><div><span class="section-kicker">CONNECTIONS</span><h2>Provider 插头</h2></div><button class="dialog-close" data-close-panel="providerPanel" aria-label="关闭 Provider 插头">关闭</button></div>
+  <div class="dialog-scroll"><p class="hint">配置保存在本机后端，API Key 不回读；Key 留空会保留已有值。切换从下一轮生效。</p><div id="providerInfo" class="provider-info hint"></div>
+    <details class="provider-group" open><summary><span><strong>LLM</strong><small>OpenAI-compatible</small></span><span>展开配置</span></summary><div class="details-body"><label>Profile<select id="llmProfile"></select></label><div class="button-row"><button id="newLlmProfile">新建</button><button id="deleteLlmProfile" class="danger-button">删除</button></div><label>名称<input id="llmName"></label><label>Base URL<input id="llmBaseUrl" placeholder="https://api.example.com/v1"></label><label>API Key<input id="llmApiKey" type="password" autocomplete="new-password"></label><label>Model（可手动输入）<input id="llmModel" placeholder="输入模型名，或先拉取后从下方选择"></label><label>拉取到的模型<select id="llmFetchedModels" disabled><option value="">点击“拉取模型”后在这里选择</option></select></label><div class="button-row"><button id="saveLlmProfile" class="primary-button">保存并启用</button><button id="fetchLlmModels">拉取模型</button><button id="testLlmProfile">测试流式连接</button></div><span id="llmProviderState" class="hint"></span></div></details>
+    <details class="provider-group"><summary><span><strong>STT</strong><small>火山语音识别</small></span><span>展开配置</span></summary><div class="details-body"><label>Profile<select id="sttProfile"></select></label><div class="button-row"><button id="newSttProfile">新建</button><button id="deleteSttProfile" class="danger-button">删除</button></div><label>名称<input id="sttName"></label><label>完整 WAV Endpoint<input id="sttEndpoint"></label><label>边录边传 Endpoint<input id="sttStreamEndpoint"></label><label>Resource ID<input id="sttResourceId"></label><label>API Key<input id="sttApiKey" type="password" autocomplete="new-password"></label><label class="inline-check"><input id="sttTwoPass" type="checkbox">边录边传启用二遍识别</label><div class="button-row"><button id="saveSttProfile" class="primary-button">保存并启用</button><button id="testSttProfile">真实最小识别测试</button></div><span id="sttProviderState" class="hint"></span></div></details>
+    <details class="provider-group"><summary><span><strong>TTS</strong><small>语音合成</small></span><span>展开配置</span></summary><div class="details-body"><label>Profile<select id="ttsProfile"></select></label><div class="button-row"><button id="newTtsProfile">新建</button><button id="deleteTtsProfile" class="danger-button">删除</button></div><label>名称<input id="ttsName"></label><label>类型<select id="ttsProviderType"><option value="websocket">WebSocket / 火山双向</option><option value="http">HTTP JSON</option></select></label><label>Endpoint<input id="ttsEndpoint"></label><label>Resource ID<input id="ttsResourceId"></label><label>API Key<input id="ttsApiKey" type="password" autocomplete="new-password"></label><label>Voice Type<input id="ttsVoiceType"></label><label>Emotion<input id="ttsEmotion"></label><label class="inline-check"><input id="ttsEnableEmotion" type="checkbox">启用音色情感</label><div class="manager-primary"><label>Emotion Scale（1-5）<input id="ttsEmotionScale" type="number" min="1" max="5" step="0.1"></label><label>Speed Ratio（0.1-2）<input id="ttsSpeedRatio" type="number" min="0.1" max="2" step="0.1"></label></div><label>Request Template (JSON)<textarea id="ttsRequestTemplate">{}</textarea></label><div class="button-row"><button id="saveTtsProfile" class="primary-button">保存并启用</button><button id="testTtsProfile">真实最小合成测试</button></div><span id="ttsProviderState" class="hint"></span></div></details>
+  </div>
+</dialog>
+<dialog id="llmDebugDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>上下文调试</h2><button id="closeLlmDebug" aria-label="关闭">关闭</button></div><p class="hint">以下内容来自实际请求和响应。对话区显示的是规则清理后文本，不是严格的 LLM 原文。</p><h3>1. 实际发送给 LLM 的完整消息</h3><pre id="llmMessagesDebug"></pre><h3>2. LLM 原始回复（一字未改）</h3><pre id="llmRawDebug"></pre><h3>3. 规则清理后的对话文本</h3><pre id="llmNormalizedDebug"></pre><h3>4. 实际送给 TTS 的文本</h3><pre id="llmTtsDebug"></pre><h3>5. Lorebook 激活、原因与是否发送</h3><pre id="lorebookActivationDebug"></pre></dialog>
+<dialog id="promptImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>Preset 导入报告</h2><button id="closePromptImport" aria-label="关闭">关闭</button></div><pre id="promptImportReport"></pre><div id="promptMarkerMappings" class="marker-mappings"></div><div class="button-row"><button id="confirmPromptImport">确认导入并启用</button></div></dialog>
+<dialog id="lorebookImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>Lorebook 导入报告</h2><button id="closeLorebookImport" aria-label="关闭">关闭</button></div><pre id="lorebookImportReport"></pre><div class="button-row"><button id="confirmLorebookImport">确认导入并启用</button></div></dialog>
+<script src="/static/app.js"></script>
+</body></html>
