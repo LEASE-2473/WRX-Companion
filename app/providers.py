@@ -19,6 +19,7 @@ class ProviderError(RuntimeError):
 
 _LLM_HTTP_CLIENT: httpx.AsyncClient | None = None
 _TTS_HTTP_CLIENT: httpx.AsyncClient | None = None
+_VOLCENGINE_STT_BOOSTING_TABLE_ID = ""
 
 
 def _input_token_usage(body: Any) -> int | None:
@@ -75,7 +76,8 @@ def _pack_header(message_type: int, flags: int, serialization: int, compression:
     return bytes([(1 << 4) | 1, (message_type << 4) | flags, (serialization << 4) | compression, 0])
 
 def _pack_message(header: bytes, payload: bytes, sequence: int | None = None) -> bytes:
-    return header + struct.pack(">I", len(payload)) + payload
+    sequence_bytes = b"" if sequence is None else struct.pack(">i", sequence)
+    return header + sequence_bytes + struct.pack(">I", len(payload)) + payload
 
 class VolcengineStt(SttProvider):
     def __init__(self, profile: SttProviderProfile) -> None:
@@ -109,6 +111,8 @@ class VolcengineStt(SttProvider):
                 "show_utterances": True,
             },
         }
+        if _VOLCENGINE_STT_BOOSTING_TABLE_ID:
+            request["request"]["corpus"] = {"boosting_table_id": _VOLCENGINE_STT_BOOSTING_TABLE_ID}
         compressed = gzip.compress(json.dumps(request, ensure_ascii=False).encode())
         endpoint = profile.stream_endpoint or "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
         async with websockets.connect(endpoint, additional_headers=headers) as ws:
@@ -128,12 +132,17 @@ class VolcengineStt(SttProvider):
                 await ws.send(_pack_message(_pack_header(2, 2, 0, 1), gzip.compress(final_chunk)))
 
             sender = asyncio.create_task(send_audio())
+
+            async def receive_with_upload_state() -> tuple[Any, bool]:
+                message = await ws.recv()
+                return message, sender.done()
+
             final_text = ""
             try:
                 while True:
                     if sender.done() and sender.exception() is not None:
                         raise sender.exception()
-                    receive = asyncio.create_task(ws.recv())
+                    receive = asyncio.create_task(receive_with_upload_state())
                     watched = {receive} if sender.done() else {receive, sender}
                     done, _ = await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
                     if sender in done and sender.exception() is not None:
@@ -142,17 +151,20 @@ class VolcengineStt(SttProvider):
                     if receive not in done:
                         receive.cancel()
                         continue
-                    message = receive.result()
+                    message, upload_finished_when_received = receive.result()
                     data, text, is_final = _decode_stt_response(message)
                     if text:
-                        final_text = text
+                        final_text = _merge_streaming_transcript(final_text, text)
                         if on_partial:
-                            await on_partial(text)
-                    if is_final:
+                            await on_partial(final_text)
+                    # 双向流式会在 VAD 分句时返回确定结果；用户尚未松键、客户端末包尚未发出时，
+                    # 任何服务端 final 都只能视为分段完成，不能结束整段 PTT。
+                    if is_final and upload_finished_when_received:
                         break
                 await sender
             except ConnectionClosed:
-                pass
+                if not sender.done():
+                    raise ProviderError("火山 STT 在用户松键前提前关闭实时连接")
             finally:
                 if not sender.done():
                     sender.cancel()
@@ -169,17 +181,31 @@ class VolcengineStt(SttProvider):
             "X-Api-Sequence": "-1",
         }
         headers["X-Api-Key"] = profile.api_key
-        request = {"user": {"uid": "local-user"}, "audio": {"format": "wav", "rate": 16000, "bits": 16, "channel": 1}, "request": {"model_name": "bigmodel", "enable_itn": True, "enable_punc": True}}
+        request = {
+            "user": {"uid": "local-user"},
+            "audio": {"format": "wav", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1},
+            "request": {
+                "model_name": "bigmodel",
+                "enable_itn": True,
+                "enable_punc": True,
+                "result_type": "full",
+                "show_utterances": False,
+            },
+        }
+        if _VOLCENGINE_STT_BOOSTING_TABLE_ID:
+            request["request"]["corpus"] = {"boosting_table_id": _VOLCENGINE_STT_BOOSTING_TABLE_ID}
         compressed = gzip.compress(json.dumps(request, ensure_ascii=False).encode())
         async with websockets.connect(profile.endpoint, additional_headers=headers) as ws:
-            await ws.send(_pack_message(_pack_header(1, 0, 1, 1), compressed))
-            chunk_size = 6400  # 16 kHz / 16-bit / mono 下约 200 ms，遵循官方建议。
-            offsets = list(range(0, len(audio), chunk_size))
-            for index, offset in enumerate(offsets):
-                chunk = gzip.compress(audio[offset:offset + chunk_size])
-                is_last = index == len(offsets) - 1
-                # audio-only payload 是 raw bytes（serialization=0），末块真实音频直接标记为负包。
-                await ws.send(_pack_message(_pack_header(2, 2 if is_last else 0, 0, 1), chunk))
+            sequence = 1
+            await ws.send(_pack_message(_pack_header(1, 1, 1, 1), compressed, sequence=sequence))
+            chunk_size = 3200  # 16 kHz / 16-bit / mono 下约 100 ms；完整 WAV 按递增序列发送。
+            for offset in range(0, len(audio), chunk_size):
+                sequence += 1
+                chunk = audio[offset:offset + chunk_size]
+                await ws.send(_pack_message(_pack_header(2, 1, 0, 0), chunk, sequence=sequence))
+            sequence += 1
+            # V3 nostream 以额外的空音频负序列包结束，不把真实尾音块兼作结束包。
+            await ws.send(_pack_message(_pack_header(2, 3, 0, 0), b"", sequence=-sequence))
             final_text = ""
             received_types: list[int] = []
             parsed_responses = 0
@@ -296,6 +322,23 @@ def _decode_stt_response(message: Any) -> tuple[dict[str, Any] | None, str, bool
                     text = item["text"]
                     break
     return data, text, flags in (2, 3) or bool(data.get("is_last_package"))
+
+
+def _merge_streaming_transcript(existing: str, incoming: str) -> str:
+    """兼容累计全文和逐分句两种实时 STT 返回，避免后一个分句覆盖前文。"""
+    previous = existing.strip()
+    current = incoming.strip()
+    if not previous:
+        return current
+    if not current or current == previous or previous.startswith(current):
+        return previous
+    if current.startswith(previous):
+        return current
+    max_overlap = min(len(previous), len(current))
+    for size in range(max_overlap, 1, -1):
+        if previous[-size:] == current[:size]:
+            return previous + current[size:]
+    return previous + current
 
 class OpenAICompatibleLlm(LlmProvider):
     def __init__(self, profile: LlmProviderProfile) -> None:

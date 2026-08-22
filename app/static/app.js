@@ -1,4 +1,6 @@
 const $ = id => document.getElementById(id);
+const STT_INTEGRITY_MODE = true;
+const MICROPHONE_WARM_IDLE_MS = 60000;
 let settings;
 let messages = [];
 let conversations = [];
@@ -13,6 +15,11 @@ let chunks = [];
 let recording = false;
 let stopping = false;
 let startPromise = null;
+let finishPromise = null;
+let activeTalkPointerId = null;
+let sttOpeningPromise = null;
+let pendingSttFrames = [];
+let microphoneReleaseTimer = null;
 let key = normalizeHotkey(localStorage.pttKey || 'Space');
 let pendingKey = key;
 let capturingKey = false;
@@ -29,6 +36,11 @@ let lorebookDirty = false;
 let lastLorebookTrace = null;
 
 function status(value) { $('status').textContent = value; }
+function microphoneIsLive() { return Boolean(mediaStream?.getAudioTracks().some(track => track.readyState === 'live')); }
+function releaseMicrophone() { if (microphoneReleaseTimer) clearTimeout(microphoneReleaseTimer); microphoneReleaseTimer = null; if (mediaStream) mediaStream.getTracks().forEach(track => track.stop()); mediaStream = null; }
+function scheduleMicrophoneRelease() { if (microphoneReleaseTimer) clearTimeout(microphoneReleaseTimer); microphoneReleaseTimer = setTimeout(() => { if (!recording && !startPromise) releaseMicrophone(); }, MICROPHONE_WARM_IDLE_MS); }
+async function acquireMicrophone() { if (microphoneReleaseTimer) clearTimeout(microphoneReleaseTimer); microphoneReleaseTimer = null; if (!microphoneIsLive()) mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true }); return mediaStream; }
+async function prewarmMicrophoneIfGranted() { try { if (!navigator.permissions?.query) return; const permission = await navigator.permissions.query({ name: 'microphone' }); if (permission.state !== 'granted' || microphoneIsLive()) return; await acquireMicrophone(); scheduleMicrophoneRelease(); } catch {} }
 function formatTime(value) { return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`; }
 function normalizeHotkey(value) { const trimmed = String(value || '').trim(); if (/^[a-z]$/i.test(trimmed)) return `Key${trimmed.toUpperCase()}`; if (/^[0-9]$/.test(trimmed)) return `Digit${trimmed}`; return trimmed || 'Space'; }
 function formatHotkey(value) { if (value === 'Space') return 'Space'; if (value.startsWith('Key')) return value.slice(3); if (value.startsWith('Digit')) return value.slice(5); return value; }
@@ -73,6 +85,10 @@ function renderConversationSelect() {
 }
 function setConversationControlsDisabled(disabled) {
   ['conversationSelect', 'newConversation', 'saveConversation', 'clearConversation'].forEach(id => { $(id).disabled = disabled; });
+}
+function setTextInputControlsDisabled(disabled) {
+  $('sendText').disabled = disabled;
+  $('textInput').readOnly = disabled;
 }
 function setConfigurationControlsDisabled(disabled) { $('contextSettingsPanel').inert = disabled; $('promptPanel').inert = disabled; $('lorebookPanel').inert = disabled; $('providerPanel').inert = disabled; }
 
@@ -347,60 +363,92 @@ async function start() {
   if (currentAudio && !currentAudio.paused) { status('请先中断当前播放'); return; }
   setConversationControlsDisabled(true);
   setConfigurationControlsDisabled(true);
+  setTextInputControlsDisabled(true);
   stopping = false;
+  status('Preparing Microphone');
   startPromise = (async () => {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStream = await acquireMicrophone();
     audioContext = new AudioContext();
     source = audioContext.createMediaStreamSource(mediaStream);
     processor = audioContext.createScriptProcessor(4096, 1, 1);
     chunks = [];
-    sttStream = await openStreamingStt();
-    processor.onaudioprocess = event => { if (!recording) return; const samples = new Float32Array(event.inputBuffer.getChannelData(0)); chunks.push(samples); if (sttStream?.ready && sttStream.socket.readyState === WebSocket.OPEN) sttStream.socket.send(encodePcm16(samples, audioContext.sampleRate)); };
+    pendingSttFrames = [];
+    sttStream = null;
+    processor.onaudioprocess = event => {
+      if (!recording) return;
+      const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+      chunks.push(samples);
+      if (STT_INTEGRITY_MODE) return;
+      const pcm = encodePcm16(samples, audioContext.sampleRate);
+      if (sttStream?.ready && sttStream.socket.readyState === WebSocket.OPEN) sttStream.socket.send(pcm);
+      else if (sttOpeningPromise) pendingSttFrames.push(pcm);
+    };
     source.connect(processor);
     processor.connect(audioContext.destination);
+    await audioContext.resume();
     recording = true;
     $('talk').classList.add('active');
     status('Listening');
+    sttOpeningPromise = (STT_INTEGRITY_MODE ? Promise.resolve(null) : openStreamingStt()).then(state => {
+      sttStream = state;
+      if (state?.ready && state.socket.readyState === WebSocket.OPEN) pendingSttFrames.forEach(frame => state.socket.send(frame));
+      pendingSttFrames = [];
+      return state;
+    });
   })();
-  try { await startPromise; if (stopping) await finishRecording(); } catch (error) { if (sttStream) { try { sttStream.socket.close(); } catch {} sttStream = null; } if (mediaStream) mediaStream.getTracks().forEach(track => track.stop()); setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); status('Error'); alert(`无法开始录音：${error.message}`); } finally { startPromise = null; }
+  try { await startPromise; if (stopping) await stop(); } catch (error) { if (sttStream) { try { sttStream.socket.close(); } catch {} sttStream = null; } pendingSttFrames = []; releaseMicrophone(); setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); setTextInputControlsDisabled(false); status('Error'); alert(`无法开始录音：${error.message}`); } finally { startPromise = null; }
 }
 
-async function stop() { if (startPromise && !recording) { stopping = true; return; } await finishRecording(); }
+async function stop() {
+  if (startPromise && !recording) { stopping = true; return; }
+  if (finishPromise) return finishPromise;
+  finishPromise = finishRecording().finally(() => { finishPromise = null; });
+  return finishPromise;
+}
 
 async function finishRecording() {
   if (!recording || !audioContext) return;
+  stopping = true;
+  status('Finalizing Recording');
+  const drainMs = Math.ceil(processor.bufferSize / audioContext.sampleRate * 1000) + 20;
+  await new Promise(resolve => setTimeout(resolve, drainMs));
+  if (!recording || !audioContext) return;
   recording = false;
-  stopping = false;
   processor.onaudioprocess = null;
   source.disconnect();
   processor.disconnect();
-  mediaStream.getTracks().forEach(track => track.stop());
+  scheduleMicrophoneRelease();
   const releasedAt = performance.now();
   const sourceRate = audioContext.sampleRate;
-  await new Promise(requestAnimationFrame);
   const data = new Float32Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
   let offset = 0;
   chunks.forEach(chunk => { data.set(chunk, offset); offset += chunk.length; });
   const wav = encodeWav(data, sourceRate);
   await audioContext.close();
   audioContext = null;
+  if (sttOpeningPromise) await sttOpeningPromise;
+  sttOpeningPromise = null;
+  stopping = false;
   $('talk').classList.remove('active');
-  if (!data.length) { setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); status('Idle'); return; }
+  if (!data.length) { setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); setTextInputControlsDisabled(false); status('Idle'); return; }
   const streamed = await finishStreamingStt(releasedAt);
   await processAudio(wav, streamed, releasedAt, data.length / sourceRate);
 }
 
-async function processAudio(wav, streamed = null, requestStarted = performance.now(), recordingDuration = 0) {
+async function processAudio(wav, streamed = null, requestStarted = performance.now(), recordingDuration = 0, typedText = '') {
   stopAudio();
-  if (processing) return;
+  if (processing) return false;
   processing = true;
   setConversationControlsDisabled(true);
+  setConfigurationControlsDisabled(true);
+  setTextInputControlsDisabled(true);
   const requestConversationId = activeConversationId;
   const requestMessages = [...messages];
   await prepareStreamPlayback(requestStarted);
-  status('Transcribing');
+  status(typedText ? 'Thinking' : 'Transcribing');
+  let completed = false;
   try {
-    const body = streamed?.text ? { transcript: streamed.text, stt_latency: streamed.latency, recording_duration: recordingDuration, messages: requestMessages, provider_snapshot_id: streamed.snapshotId || '' } : { audio_base64: b64(wav), messages: requestMessages, provider_snapshot_id: streamed?.snapshotId || '' };
+    const body = typedText ? { transcript: typedText, stt_latency: 0, recording_duration: 0, messages: requestMessages } : STT_INTEGRITY_MODE ? { audio_base64: b64(wav), messages: requestMessages } : streamed?.text ? { transcript: streamed.text, stt_latency: streamed.latency, recording_duration: recordingDuration, messages: requestMessages, provider_snapshot_id: streamed.snapshotId || '' } : { audio_base64: b64(wav), messages: requestMessages, provider_snapshot_id: streamed?.snapshotId || '' };
     const result = await fetch('/api/process/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!result.ok || !result.body) throw new Error('流式接口不可用');
     const reader = result.body.getReader();
@@ -413,12 +461,24 @@ async function processAudio(wav, streamed = null, requestStarted = performance.n
       if (payload.type === 'transcript') { transcript = payload.text; addMessage('user', transcript); status('Thinking'); }
       if (payload.type === 'delta') { if (!assistantNode) { assistantNode = messageNode('assistant', ''); $('chat').prepend(assistantNode); } assistantNode.textContent = `Assistant: ${(assistantNode.textContent.replace(/^Assistant: /, '') || '')}${payload.text}`; }
       if (payload.type === 'audio_chunk') schedulePcmChunk(payload.audio_base64, payload.sample_rate || 24000);
-      if (payload.type === 'complete') { if (activeConversationId !== requestConversationId) throw new Error('当前对话已切换，本轮结果未写入页面'); messages = payload.messages; renderConversation(); saveLlmDebug(payload.debug); if (streamPlayback?.firstPlaybackAt) payload.latency.actual_first_playback = (streamPlayback.firstPlaybackAt - streamPlayback.requestStarted) / 1000; renderDebug(payload, transcript); await persistConversation(requestConversationId, messages); if (payload.audio_streamed) finishStreamPlayback(payload); else { discardPreparedStream(); if (!payload.error && payload.audio_base64) playAudio(payload); } if (payload.error || (!payload.audio_streamed && !payload.audio_base64)) { status('Error'); alert(`语音生成失败，但回复文本已保留：${payload.error || 'TTS 未返回音频'}`); setTimeout(() => status('Idle'), 1500); } }
+      if (payload.type === 'complete') { if (activeConversationId !== requestConversationId) throw new Error('当前对话已切换，本轮结果未写入页面'); messages = payload.messages; renderConversation(); saveLlmDebug(payload.debug); if (streamPlayback?.firstPlaybackAt) payload.latency.actual_first_playback = (streamPlayback.firstPlaybackAt - streamPlayback.requestStarted) / 1000; renderDebug(payload, transcript); await persistConversation(requestConversationId, messages); completed = true; if (payload.audio_streamed) finishStreamPlayback(payload); else { discardPreparedStream(); if (!payload.error && payload.audio_base64) playAudio(payload); } if (payload.error || (!payload.audio_streamed && !payload.audio_base64)) { status('Error'); alert(`语音生成失败，但回复文本已保留：${payload.error || 'TTS 未返回音频'}`); setTimeout(() => status('Idle'), 1500); } }
       if (payload.type === 'failure') { discardPreparedStream(); renderConversation(); renderDebug(payload); if (payload.audio_base64) playAudio(payload); alert(payload.detail); }
       if (payload.type === 'error') { if (payload.prompt_tokens) renderDebug(payload); throw new Error(payload.detail); }
     };
     while (true) { const { value, done } = await reader.read(); buffer += decoder.decode(value || new Uint8Array(), { stream: !done }); const frames = buffer.split('\n\n'); buffer = frames.pop() || ''; for (const frame of frames) { const line = frame.split('\n').find(item => item.startsWith('data: ')); if (line) await consume(JSON.parse(line.slice(6))); } if (done) break; }
-  } catch (error) { discardPreparedStream(); renderConversation(); if (error.message === 'No speech detected') { status('No speech detected'); setTimeout(() => status('Idle'), 1200); } else { status('Error'); alert(error.message); setTimeout(() => status('Idle'), 1500); } } finally { processing = false; setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); }
+  } catch (error) { discardPreparedStream(); renderConversation(); if (error.message === 'No speech detected') { status('No speech detected'); setTimeout(() => status('Idle'), 1200); } else { status('Error'); alert(error.message); setTimeout(() => status('Idle'), 1500); } } finally { processing = false; setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); setTextInputControlsDisabled(false); }
+  return completed;
+}
+
+async function sendTypedText() {
+  const input = $('textInput');
+  const typedText = input.value.trim();
+  if (!typedText) { $('textInputState').textContent = '请先输入要发送的文字。'; input.focus(); return; }
+  if (recording || startPromise || finishPromise || processing) { $('textInputState').textContent = '当前一轮尚未结束，请稍后再发送。'; return; }
+  $('textInputState').textContent = '正在发送：已跳过 STT。';
+  const completed = await processAudio(null, null, performance.now(), 0, typedText);
+  if (completed) { input.value = ''; $('textInputState').textContent = '已发送并写入当前对话；本轮未调用 STT。'; }
+  else $('textInputState').textContent = '发送失败，原文已保留，可直接重试。';
 }
 
 async function openStreamingStt() {
@@ -527,11 +587,27 @@ providerGroups.forEach(group => {
 });
 $('contextSettingsPanel').ontoggle = event => { const action = event.currentTarget.querySelector('.summary-action'); if (action) action.textContent = event.currentTarget.open ? '收起设置' : '展开设置'; };
 
-$('talk').onmousedown = start;
-$('talk').onmouseup = stop;
-$('talk').onmouseleave = () => recording && stop();
-$('talk').ontouchstart = event => { event.preventDefault(); start(); };
-$('talk').ontouchend = event => { event.preventDefault(); stop(); };
+function beginTalkPointer(event) {
+  if (!event.isPrimary || activeTalkPointerId !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  event.preventDefault();
+  activeTalkPointerId = event.pointerId;
+  try { $('talk').setPointerCapture(event.pointerId); } catch {}
+  void start();
+}
+function endTalkPointer(event) {
+  if (activeTalkPointerId === null || event.pointerId !== activeTalkPointerId) return;
+  event.preventDefault();
+  const pointerId = activeTalkPointerId;
+  activeTalkPointerId = null;
+  try { if ($('talk').hasPointerCapture(pointerId)) $('talk').releasePointerCapture(pointerId); } catch {}
+  void stop();
+}
+$('talk').onpointerdown = beginTalkPointer;
+$('talk').onpointerup = endTalkPointer;
+$('talk').onpointercancel = endTalkPointer;
+$('talk').onlostpointercapture = endTalkPointer;
+$('sendText').onclick = () => void sendTypedText();
+$('textInput').onkeydown = event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void sendTypedText(); } };
 window.onkeydown = event => { if (capturingKey) { event.preventDefault(); event.stopPropagation(); if (event.code === 'Escape') { capturingKey = false; pendingKey = key; $('keyInput').value = formatHotkey(key); $('captureKey').textContent = '录制按键'; setKeyState('已取消录制，原按键未变'); return; } pendingKey = event.code; capturingKey = false; $('keyInput').value = formatHotkey(pendingKey); $('captureKey').textContent = '重新录制'; setKeyState(`已录制 ${formatHotkey(pendingKey)}，点击“保存并立即生效”`, 'dirty'); return; } const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName); const managerOpen = Boolean(document.querySelector('.manager-dialog[open]')); if (!managerOpen && !editing && event.code === key && !event.repeat) { event.preventDefault(); start(); } };
 window.onkeyup = event => { if (!capturingKey && event.code === key) { event.preventDefault(); stop(); } };
 $('playPause').onclick = toggleAudio;
@@ -591,3 +667,5 @@ function encodeWav(samples, sampleRate) { const pcm = resample(samples, sampleRa
 updatePlayback();
 setInterval(updatePlayback, 200);
 load();
+void prewarmMicrophoneIfGranted();
+window.addEventListener('beforeunload', releaseMicrophone);
