@@ -1,4 +1,4 @@
-# 温柔乡陪伴计划 2.0 — 当前项目上下文
+# WRX Companion — 当前项目上下文
 
 更新日期：2026-10-01（Asia/Shanghai）。记录实际实现和验收范围。
 
@@ -12,7 +12,7 @@
 
 - 唯一项目根目录：`D:\LEASE AI Project\温柔乡陪伴计划 2.0`。
 - GitHub WRX 基线：`96fb793a2fa22866e7f37982c8b02ebf8462af92`，来自 https://github.com/LEASE-2473/WRX-Voice-Agent。
-- 本地保留 WRX 历史；本次用户授权提交并公开发布到 https://github.com/LEASE-2473/companion-v2，origin 指向该独立仓库。仓库级身份改为 LEASE-2473 / 130589390+LEASE-2473@users.noreply.github.com；不修改全局身份。`data/` 与密钥保持忽略，新电脑恢复自定义配置需私下迁移整个 data 目录。
+- 本地保留 WRX 历史；本次用户授权提交并公开发布到 https://github.com/LEASE-2473/WRX-Companion，origin 指向该独立仓库。仓库级身份改为 LEASE-2473 / 130589390+LEASE-2473@users.noreply.github.com；不修改全局身份。`data/` 与密钥保持忽略，新电脑恢复自定义配置需私下迁移整个 data 目录。
 - 根目录无 AGENTS.md，使用用户给定的中文连续性文档规则。
 
 ## 技术栈与目录
@@ -74,3 +74,5 @@ node --check app/static/chat-ui.js
 ## 公开仓库与跨电脑启动
 
 `README.md` 提供 Python 环境安装、克隆、启动、离线测试与私有数据迁移步骤。公开代码不包含本机聊天、角色配置或自定义预设；新电脑可生成默认配置，也可停服后私下复制 data。2026-10-01 发布前再次验证：60 项 pytest 通过（1 条既有弃用警告），Python 编译、pip check、三个 JS 语法检查及两个 Node 回归脚本通过；历史三次提交及待发布文件凭据模式扫描未发现真实密钥。
+
+项目正式名称为 `WRX Companion`，公开仓库名为 `WRX-Companion`；页面标题与侧栏品牌同步更新。本地目录沿用现有路径，默认角色「温柔乡」为角色名称，保留已有数据。

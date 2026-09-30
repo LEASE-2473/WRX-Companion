@@ -1,3 +1,11 @@
+## 2026-10-01 — 项目统一命名为 WRX Companion
+
+- 用户目标：项目名称改为 WRX Companion。
+- 修改：GitHub 公开仓库重命名为 `LEASE-2473/WRX-Companion`，更新仓库描述、本地 origin、README 克隆命令、页面标题与侧栏品牌、当前项目上下文；默认角色名和本地目录保留。
+- 文件：`README.md`、`app/static/index.html`、`PROJECT_CONTEXT.md`、`CHANGELOG.md`；GitHub 仓库属性及本地 Git 远程配置。
+- 验证：GitHub API 返回新地址且 private=false；Python 断言检查页面品牌、README 新克隆地址与 cd 命令；git diff --check 与 git diff --cached --check 通过。
+- 未完成与风险：未做新电脑实际部署；本次仅品牌和仓库地址变化，无业务逻辑变更，未重复完整测试。
+
 ## 2026-10-01 — 本地提交与 GitHub 公开发布
 
 - 用户目标：将当前 2.0 项目提交到独立公开 GitHub 仓库，供另一台电脑部署。

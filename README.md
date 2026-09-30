@@ -1,4 +1,4 @@
-# 温柔乡陪伴计划 2.0
+# WRX Companion
 
 基于 FastAPI 的多角色文字陪伴应用，支持流式聊天、图片附件、会话分支、逐条 TTS、联网搜索和后台主动联系。当前版本为 2.0.0-alpha。
 
@@ -7,8 +7,8 @@
 安装 Python 3.11 或更高版本（推荐 3.12）和 Git，然后执行：
 
 ```powershell
-git clone https://github.com/LEASE-2473/companion-v2.git
-cd companion-v2
+git clone https://github.com/LEASE-2473/WRX-Companion.git
+cd WRX-Companion
 .\start_companion.bat
 ```
 
