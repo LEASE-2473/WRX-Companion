@@ -34,6 +34,11 @@ let draggedLoreEntryId = null;
 let pendingLorebookImport = null;
 let lorebookDirty = false;
 let lastLorebookTrace = null;
+let pendingVectorImport = null;
+let selectedVectorImportFile = null;
+let inspectedVectorLibraryId = null;
+let vectorChunkOffset = 0;
+const VECTOR_CHUNK_PAGE_SIZE = 20;
 
 function status(value) { $('status').textContent = value; }
 function microphoneIsLive() { return Boolean(mediaStream?.getAudioTracks().some(track => track.readyState === 'live')); }
@@ -47,8 +52,8 @@ function formatHotkey(value) { if (value === 'Space') return 'Space'; if (value.
 function setKeyState(message, kind = '') { $('keyState').textContent = message; $('keyState').className = `hint ${kind}`.trim(); }
 function setPromptState(message, kind = '') { $('promptState').textContent = message; $('promptState').className = `hint ${kind}`.trim(); }
 function setHistoryDepthState(message, kind = '') { $('historyDepthState').textContent = message; $('historyDepthState').className = `hint ${kind}`.trim(); }
-function renderDebug(out) { const promptHash = out.debug?.prompt_sha256 || ''; if (promptHash) setPromptState(promptDirty ? `本轮使用已保存 Preset（指纹 ${promptHash}）；页面仍有未保存修改` : `本轮已注入当前 Preset（指纹 ${promptHash}）`, promptDirty ? 'dirty' : 'saved'); const values = [['STT', out.latency?.stt], ['LLM 首 Token', out.latency?.llm_first_token], ['首个可朗读片段', out.latency?.llm_first_tts_segment], ['TTS 首音', out.latency?.tts_first_audio], ['松键到服务端首音', out.latency?.response_to_first_audio], ['松键到实际首播', out.latency?.actual_first_playback], ['后台总耗时', out.latency?.total]]; const timings = values.filter(([, value]) => Number.isFinite(value)).map(([label, value]) => `<div class="latency-item"><span>${label}</span><strong>${value.toFixed(3)}s</strong></div>`).join(''); const metric = out.prompt_tokens; const token = Number.isFinite(metric?.value) ? `<div class="latency-item"><span>最终 Prompt Token</span><strong>${Math.trunc(metric.value)}${metric.source === 'provider' ? '（实际）' : '（估算）'}</strong></div>` : ''; $('latencyInfo').innerHTML = timings + token || '尚无数据'; }
-function saveLlmDebug(debug) { lastLlmDebug = debug || null; lastLorebookTrace = debug?.prompt_trace ? { lorebook: debug.prompt_trace.lorebook, entries: debug.prompt_trace.lorebook_activation || [] } : null; $('showLlmDebug').disabled = !lastLlmDebug; if (settings?.lorebooks) renderLorebookEntries(); }
+function renderDebug(out) { const promptHash = out.debug?.prompt_sha256 || ''; if (promptHash) setPromptState(promptDirty ? `本轮使用已保存 Preset（指纹 ${promptHash}）；页面仍有未保存修改` : `本轮已注入当前 Preset（指纹 ${promptHash}）`, promptDirty ? 'dirty' : 'saved'); const values = [['STT', out.latency?.stt], ['向量召回', out.latency?.vector_retrieval], ['LLM 首 Token', out.latency?.llm_first_token], ['首个可朗读片段', out.latency?.llm_first_tts_segment], ['TTS 首音', out.latency?.tts_first_audio], ['松键到服务端首音', out.latency?.response_to_first_audio], ['松键到实际首播', out.latency?.actual_first_playback], ['后台总耗时', out.latency?.total]]; const timings = values.filter(([, value]) => Number.isFinite(value)).map(([label, value]) => `<div class="latency-item"><span>${label}</span><strong>${value.toFixed(3)}s</strong></div>`).join(''); const metric = out.prompt_tokens; const token = Number.isFinite(metric?.value) ? `<div class="latency-item"><span>最终 Prompt Token</span><strong>${Math.trunc(metric.value)}${metric.source === 'provider' ? '（实际）' : '（估算）'}</strong></div>` : ''; $('latencyInfo').innerHTML = timings + token || '尚无数据'; }
+function saveLlmDebug(debug) { lastLlmDebug = debug || null; lastLorebookTrace = debug?.prompt_trace ? { lorebook: debug.prompt_trace.lorebook, entries: debug.prompt_trace.lorebook_activation || [], vector_memory: debug.prompt_trace.vector_memory || {} } : null; $('showLlmDebug').disabled = !lastLlmDebug; if (settings?.lorebooks) renderLorebookEntries(); }
 function showLlmDebug() { if (!lastLlmDebug) return; $('llmMessagesDebug').textContent = JSON.stringify(lastLlmDebug.llm_messages || [], null, 2); $('llmRawDebug').textContent = lastLlmDebug.llm_raw ?? ''; $('llmNormalizedDebug').textContent = lastLlmDebug.normalized_reply ?? ''; $('llmTtsDebug').textContent = lastLlmDebug.tts_input ?? ''; $('lorebookActivationDebug').textContent = JSON.stringify(lastLorebookTrace || {}, null, 2); $('llmDebugDialog').showModal(); }
 
 async function load() {
@@ -57,6 +62,7 @@ async function load() {
   await loadConversations();
   renderPromptPresets(settings.prompt_presets.active_preset_id);
   renderLorebooks(settings.lorebooks.active_lorebook_id);
+  renderVectorMemory();
   $('historyDepth').value = settings.runtime_settings.history_depth;
   setHistoryDepthState(`当前全局设置：最近 ${settings.runtime_settings.history_depth} 条旧消息；下一轮冻结`, 'saved');
   $('providerInfo').textContent = Object.entries(settings.provider_info).map(([key, value]) => `${key}: ${value || '未配置'}`).join(' · ');
@@ -90,7 +96,7 @@ function setTextInputControlsDisabled(disabled) {
   $('sendText').disabled = disabled;
   $('textInput').readOnly = disabled;
 }
-function setConfigurationControlsDisabled(disabled) { $('contextSettingsPanel').inert = disabled; $('promptPanel').inert = disabled; $('lorebookPanel').inert = disabled; $('providerPanel').inert = disabled; }
+function setConfigurationControlsDisabled(disabled) { $('contextSettingsPanel').inert = disabled; $('promptPanel').inert = disabled; $('lorebookPanel').inert = disabled; $('vectorPanel').inert = disabled; $('providerPanel').inert = disabled; }
 
 async function saveHistoryDepth() {
   const raw = Number($('historyDepth').value);
@@ -308,6 +314,73 @@ async function exportCurrentLorebook() { const book = selectedLorebook(); if (!b
 function lorebookReportText(report, saved = false) { return JSON.stringify({ saved, format: report.format, summary: report.summary || {}, compatibility_conversions: report.compatibility_conversions || [], entry_mappings: report.entry_mappings || [], unknown_fields: report.unknown_fields, unsupported_fields: report.unsupported_fields, warnings: report.warnings }, null, 2); }
 async function previewLorebookImport(file) { const data = JSON.parse(await file.text()); if (!data.name) data.name = file.name.replace(/\.json$/i, ''); const result = await lorebookApi('/api/lorebooks/import/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) }); pendingLorebookImport = data; $('lorebookImportReport').textContent = lorebookReportText(result.report, false); $('confirmLorebookImport').disabled = false; $('confirmLorebookImport').textContent = '确认导入并启用'; $('lorebookImportDialog').showModal(); }
 async function confirmLorebookImport() { if (!pendingLorebookImport) return; const result = await lorebookApi('/api/lorebooks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: pendingLorebookImport }) }); settings.lorebooks = result.state; renderLorebooks(result.lorebook.id); $('lorebookImportReport').textContent = lorebookReportText(result.report, true); $('confirmLorebookImport').disabled = true; $('confirmLorebookImport').textContent = '已导入'; pendingLorebookImport = null; setLorebookState('导入成功并启用；未知/不支持字段已保留并报告', 'saved'); }
+
+function setVectorConfigState(message, kind = '') { $('vectorConfigState').textContent = message; $('vectorConfigState').className = `hint ${kind}`.trim(); }
+function setVectorLibraryState(message, kind = '') { $('vectorLibraryState').textContent = message; $('vectorLibraryState').className = `hint ${kind}`.trim(); }
+async function vectorApi(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : '向量记忆操作失败'); return payload; }
+function renderVectorMemory() {
+  const state = settings.vector_memory || { config: {}, libraries: [] };
+  const config = state.config || {};
+  $('vectorEnabled').checked = Boolean(config.enabled);
+  $('vectorApiUrl').value = config.api_url || '';
+  $('vectorApiKey').value = '';
+  $('vectorApiKey').placeholder = config.api_key_set ? '已保存；留空保持原 Key' : '本地模型可留空';
+  $('vectorModel').value = config.model || 'BAAI/bge-m3';
+  $('vectorThreshold').value = config.threshold ?? 0.3;
+  $('vectorMaxResults').value = config.max_results ?? 8;
+  $('vectorContextDepth').value = config.context_depth ?? 2;
+  $('vectorSeparator').value = config.separator || '---';
+  $('vectorRerankEnabled').checked = Boolean(config.rerank_enabled);
+  $('vectorRerankUrl').value = config.rerank_url || 'https://api.siliconflow.cn/v1/rerank';
+  $('vectorRerankKey').value = '';
+  $('vectorRerankKey').placeholder = config.rerank_key_set ? '已保存；留空保持原 Key' : '本地模型可留空';
+  $('vectorRerankModel').value = config.rerank_model || 'BAAI/bge-reranker-v2-m3';
+  const list = $('vectorLibraries'); list.innerHTML = '';
+  (state.libraries || []).forEach(library => {
+    const card = document.createElement('div'); card.className = 'vector-library-card';
+    const head = document.createElement('div'); head.className = 'vector-library-head';
+    const title = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = library.name; const meta = document.createElement('small'); meta.textContent = `${library.source_format} · ${library.vectorized_count}/${library.chunk_count} 已向量化`; title.append(strong, meta);
+    const enabled = document.createElement('label'); enabled.className = 'inline-check'; const check = document.createElement('input'); check.type = 'checkbox'; check.checked = Boolean(library.enabled); enabled.append(check, document.createTextNode('参与召回'));
+    const actions = document.createElement('div'); actions.className = 'button-row'; const inspect = document.createElement('button'); inspect.textContent = '查看切片'; const vectorize = document.createElement('button'); vectorize.textContent = library.vectorized_count === library.chunk_count ? '已完成向量化' : '开始/继续向量化'; vectorize.disabled = library.chunk_count > 0 && library.vectorized_count === library.chunk_count; const remove = document.createElement('button'); remove.textContent = '删除'; remove.className = 'danger-button'; actions.append(inspect, vectorize, remove); head.append(title, enabled, actions); card.append(head); list.append(card);
+    inspect.onclick = () => void openVectorChunks(library.id).catch(error => setVectorLibraryState(`读取切片失败：${error.message}`, 'dirty'));
+    check.onchange = async () => { try { settings.vector_memory = await vectorApi(`/api/vector-memory/libraries/${encodeURIComponent(library.id)}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: check.checked }) }); renderVectorMemory(); setVectorLibraryState('知识库启用状态已保存，从下一轮生效', 'saved'); } catch (error) { check.checked = !check.checked; setVectorLibraryState(error.message, 'dirty'); } };
+    vectorize.onclick = async () => { vectorize.disabled = true; setVectorLibraryState(`正在向量化「${library.name}」；已完成批次会持续保存…`); try { const result = await vectorApi(`/api/vector-memory/libraries/${encodeURIComponent(library.id)}/vectorize`, { method: 'POST' }); settings.vector_memory = result.state; renderVectorMemory(); setVectorLibraryState(`向量化完成：新增 ${result.report.completed}，已有 ${result.report.already_vectorized}，共 ${result.report.total}`, 'saved'); } catch (error) { vectorize.disabled = false; setVectorLibraryState(`向量化失败：${error.message}；已成功的批次仍保留`, 'dirty'); } };
+    remove.onclick = async () => { if (!confirm(`删除向量知识库「${library.name}」及本地向量？`)) return; try { settings.vector_memory = await vectorApi(`/api/vector-memory/libraries/${encodeURIComponent(library.id)}`, { method: 'DELETE' }); renderVectorMemory(); setVectorLibraryState('知识库已删除', 'saved'); } catch (error) { setVectorLibraryState(error.message, 'dirty'); } };
+  });
+  $('vectorizeAllLibraries').disabled = !(state.libraries || []).some(library => library.vectorized_count < library.chunk_count);
+  if (!(state.libraries || []).length) setVectorLibraryState('尚未导入知识库');
+  setVectorConfigState(config.enabled ? '向量召回已启用；独立配置从下一轮冻结' : '向量召回当前关闭', config.enabled ? 'saved' : '');
+}
+function vectorConfigPayload() { const threshold = Number($('vectorThreshold').value); const maxResults = Number($('vectorMaxResults').value); const contextDepth = Number($('vectorContextDepth').value); return { enabled: $('vectorEnabled').checked, api_url: $('vectorApiUrl').value.trim(), api_key: $('vectorApiKey').value, model: $('vectorModel').value.trim() || 'BAAI/bge-m3', threshold: Number.isFinite(threshold) ? threshold : 0.3, max_results: Number.isInteger(maxResults) && maxResults > 0 ? maxResults : 8, context_depth: Number.isInteger(contextDepth) && contextDepth > 0 ? contextDepth : 2, separator: $('vectorSeparator').value || '---', rerank_enabled: $('vectorRerankEnabled').checked, rerank_url: $('vectorRerankUrl').value.trim() || 'https://api.siliconflow.cn/v1/rerank', rerank_key: $('vectorRerankKey').value, rerank_model: $('vectorRerankModel').value.trim() || 'BAAI/bge-reranker-v2-m3' }; }
+async function saveVectorConfig() { setVectorConfigState('正在保存…'); settings.vector_memory = await vectorApi('/api/vector-memory/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vectorConfigPayload()) }); renderVectorMemory(); setVectorConfigState('独立向量配置已保存，从下一轮生效', 'saved'); }
+async function testVectorConfig() { await saveVectorConfig(); setVectorConfigState('正在调用独立 Embedding 模型…'); const result = await vectorApi('/api/vector-memory/test', { method: 'POST' }); if (!result.ok) throw new Error(result.detail || '连接失败'); setVectorConfigState(`连接成功：模型返回 ${result.dimensions} 维向量`, 'saved'); }
+function renderFetchedVectorModels(selectId, models, emptyText) { const select = $(selectId); select.innerHTML = ''; const empty = document.createElement('option'); empty.value = ''; empty.textContent = models.length ? `请选择（${models.length} 个）` : emptyText; select.append(empty); models.forEach(model => { const option = document.createElement('option'); option.value = model; option.textContent = model; select.append(option); }); select.disabled = !models.length; }
+async function fetchVectorModels(kind = 'embedding') { await saveVectorConfig(); setVectorConfigState(`正在拉取${kind === 'rerank' ? ' Rerank' : '向量'}模型…`); const result = await vectorApi('/api/vector-memory/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) }); if (!result.ok) throw new Error(result.detail || '拉取模型失败'); const target = kind === 'rerank' ? 'vectorFetchedRerankModels' : 'vectorFetchedModels'; renderFetchedVectorModels(target, result.models || [], '没有返回模型'); setVectorConfigState(`已拉取 ${result.models.length} 个${kind === 'rerank' ? ' Rerank' : '向量'}模型`, 'saved'); }
+async function testVectorRerank() { await saveVectorConfig(); setVectorConfigState('正在测试 Rerank…'); const result = await vectorApi('/api/vector-memory/rerank/test', { method: 'POST' }); if (!result.ok) throw new Error(result.detail || 'Rerank 连接失败'); setVectorConfigState(`Rerank 连接成功，测试分数 ${Number(result.score).toFixed(4)}`, 'saved'); }
+async function vectorizeAllLibraries() { const pending = (settings.vector_memory.libraries || []).filter(library => library.vectorized_count < library.chunk_count); if (!pending.length) return; $('vectorizeAllLibraries').disabled = true; let completed = 0; for (const library of pending) { setVectorLibraryState(`正在向量化 ${library.name}（${completed + 1}/${pending.length}）…`); const result = await vectorApi(`/api/vector-memory/libraries/${encodeURIComponent(library.id)}/vectorize`, { method: 'POST' }); settings.vector_memory = result.state; completed += 1; } renderVectorMemory(); setVectorLibraryState(`全部向量化完成：${completed} 个知识库`, 'saved'); }
+async function openVectorChunks(libraryId) { inspectedVectorLibraryId = libraryId; vectorChunkOffset = 0; $('vectorChunkSearch').value = ''; $('vectorChunksDialog').showModal(); await loadVectorChunks(); }
+async function loadVectorChunks(offset = vectorChunkOffset) {
+  if (!inspectedVectorLibraryId) return;
+  const query = $('vectorChunkSearch').value.trim();
+  const params = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(VECTOR_CHUNK_PAGE_SIZE), query });
+  $('vectorChunksSummary').textContent = '正在读取切片…';
+  const result = await vectorApi(`/api/vector-memory/libraries/${encodeURIComponent(inspectedVectorLibraryId)}/chunks?${params}`);
+  vectorChunkOffset = result.offset;
+  $('vectorChunksTitle').textContent = `${result.library.name} · 切片检查`;
+  $('vectorChunksSummary').textContent = query ? `搜索命中 ${result.total} / 全部 ${result.unfiltered_total} 条；页面不显示完整向量数值` : `共 ${result.total} 条；页面不显示完整向量数值`;
+  const list = $('vectorChunksList'); list.innerHTML = '';
+  result.chunks.forEach(chunk => {
+    const details = document.createElement('details'); details.className = 'vector-chunk-card';
+    const summary = document.createElement('summary'); const heading = document.createElement('span'); heading.textContent = `#${chunk.index} · ${chunk.id}`; const badges = document.createElement('span'); badges.className = 'vector-chunk-badges';
+    const vectorBadge = document.createElement('strong'); vectorBadge.className = chunk.vectorized ? 'saved' : 'dirty'; vectorBadge.textContent = chunk.vectorized ? `已向量化 · ${chunk.vector_dimensions} 维` : '未向量化'; const charBadge = document.createElement('small'); charBadge.textContent = `${chunk.characters} 字符`; badges.append(vectorBadge, charBadge); summary.append(heading, badges);
+    const body = document.createElement('div'); body.className = 'vector-chunk-body'; const metaTitle = document.createElement('strong'); metaTitle.textContent = '元数据'; const meta = document.createElement('pre'); meta.textContent = JSON.stringify(chunk.metadata || {}, null, 2); const contentTitle = document.createElement('strong'); contentTitle.textContent = 'Embedding 正文'; const content = document.createElement('pre'); content.textContent = chunk.content; const hash = document.createElement('small'); hash.textContent = `SHA-256: ${chunk.content_sha256}`; body.append(metaTitle, meta, contentTitle, content, hash); details.append(summary, body); list.append(details);
+  });
+  if (!result.chunks.length) { const empty = document.createElement('p'); empty.className = 'hint'; empty.textContent = '没有找到匹配切片'; list.append(empty); }
+  const page = result.total ? Math.floor(result.offset / result.limit) + 1 : 0; const pages = Math.ceil(result.total / result.limit); $('vectorChunksPage').textContent = `第 ${page} / ${pages} 页`;
+  $('previousVectorChunks').disabled = result.offset <= 0; $('nextVectorChunks').disabled = result.offset + result.limit >= result.total;
+}
+async function previewVectorImport(file) { const text = await file.text(); const separator = $('vectorSeparator').value || '---'; const name = $('vectorLibraryName').value.trim() || file.name.replace(/\.(jsonl|md|markdown|txt)$/i, ''); const report = await vectorApi('/api/vector-memory/import/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, filename: file.name, separator }) }); pendingVectorImport = { text, filename: file.name, separator, name }; $('vectorImportReport').textContent = JSON.stringify({ saved: false, name, ...report }, null, 2); $('confirmVectorImport').disabled = false; $('confirmVectorImport').textContent = '确认导入（暂不调用模型）'; $('vectorImportDialog').showModal(); }
+async function confirmVectorImport() { if (!pendingVectorImport) return; const result = await vectorApi('/api/vector-memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingVectorImport) }); settings.vector_memory = result.state; renderVectorMemory(); $('vectorImportReport').textContent += '\n\n已保存切片；请回到向量管理页点击“开始/继续向量化”。'; $('confirmVectorImport').disabled = true; $('confirmVectorImport').textContent = '已导入'; pendingVectorImport = null; setVectorLibraryState('预切片已导入，尚未调用向量模型', 'saved'); }
 
 function providerCollection(kind) { return settings.provider_profiles[`${kind}_profiles`]; }
 function providerActiveKey(kind) { return `active_${kind}_profile_id`; }
@@ -648,6 +721,26 @@ $('lorebookImportFile').onchange = event => { const file = event.target.files[0]
 $('confirmLorebookImport').onclick = () => void confirmLorebookImport().catch(error => { $('lorebookImportReport').textContent += `\n\n导入失败：${error.message}`; });
 $('closeLorebookImport').onclick = () => { $('lorebookImportDialog').close(); pendingLorebookImport = null; };
 $('lorebookImportDialog').onclick = event => { if (event.target === $('lorebookImportDialog')) { $('lorebookImportDialog').close(); pendingLorebookImport = null; } };
+$('saveVectorConfig').onclick = () => void saveVectorConfig().catch(error => setVectorConfigState(error.message, 'dirty'));
+$('testVectorConfig').onclick = () => void testVectorConfig().catch(error => setVectorConfigState(error.message, 'dirty'));
+$('fetchVectorModels').onclick = () => void fetchVectorModels('embedding').catch(error => setVectorConfigState(error.message, 'dirty'));
+$('fetchVectorRerankModels').onclick = () => void fetchVectorModels('rerank').catch(error => setVectorConfigState(error.message, 'dirty'));
+$('testVectorRerank').onclick = () => void testVectorRerank().catch(error => setVectorConfigState(error.message, 'dirty'));
+$('vectorizeAllLibraries').onclick = () => void vectorizeAllLibraries().catch(error => { renderVectorMemory(); setVectorLibraryState(`批量向量化失败：${error.message}；已完成批次仍保留`, 'dirty'); });
+$('vectorFetchedModels').onchange = event => { if (event.target.value) $('vectorModel').value = event.target.value; };
+$('vectorFetchedRerankModels').onchange = event => { if (event.target.value) $('vectorRerankModel').value = event.target.value; };
+$('vectorImportFile').onchange = event => { selectedVectorImportFile = event.target.files[0] || null; $('previewVectorImport').disabled = !selectedVectorImportFile; if (selectedVectorImportFile) setVectorLibraryState(`已选择：${selectedVectorImportFile.name}；点击“读取并预览”`, 'saved'); };
+$('previewVectorImport').onclick = () => { if (selectedVectorImportFile) void previewVectorImport(selectedVectorImportFile).catch(error => setVectorLibraryState(`导入预览失败：${error.message}`, 'dirty')); };
+$('confirmVectorImport').onclick = () => void confirmVectorImport().catch(error => { $('vectorImportReport').textContent += `\n\n导入失败：${error.message}`; });
+$('closeVectorImport').onclick = () => { $('vectorImportDialog').close(); pendingVectorImport = null; };
+$('vectorImportDialog').onclick = event => { if (event.target === $('vectorImportDialog')) { $('vectorImportDialog').close(); pendingVectorImport = null; } };
+$('searchVectorChunks').onclick = () => void loadVectorChunks(0).catch(error => { $('vectorChunksSummary').textContent = error.message; });
+$('vectorChunkSearch').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); void loadVectorChunks(0).catch(error => { $('vectorChunksSummary').textContent = error.message; }); } };
+$('clearVectorChunkSearch').onclick = () => { $('vectorChunkSearch').value = ''; void loadVectorChunks(0).catch(error => { $('vectorChunksSummary').textContent = error.message; }); };
+$('previousVectorChunks').onclick = () => void loadVectorChunks(Math.max(0, vectorChunkOffset - VECTOR_CHUNK_PAGE_SIZE)).catch(error => { $('vectorChunksSummary').textContent = error.message; });
+$('nextVectorChunks').onclick = () => void loadVectorChunks(vectorChunkOffset + VECTOR_CHUNK_PAGE_SIZE).catch(error => { $('vectorChunksSummary').textContent = error.message; });
+$('closeVectorChunks').onclick = () => { $('vectorChunksDialog').close(); inspectedVectorLibraryId = null; };
+$('vectorChunksDialog').onclick = event => { if (event.target === $('vectorChunksDialog')) { $('vectorChunksDialog').close(); inspectedVectorLibraryId = null; } };
 $('conversationSelect').onchange = event => { void switchConversation(event.target.value).catch(error => { renderConversationSelect(); setConversationState(error.message, 'dirty'); }); };
 $('newConversation').onclick = () => { void createConversation().catch(error => setConversationState(`新建失败：${error.message}`, 'dirty')); };
 $('saveConversation').onclick = () => { void persistConversation().catch(error => alert(error.message)); };

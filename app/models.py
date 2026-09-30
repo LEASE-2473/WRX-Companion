@@ -104,6 +104,39 @@ class RuntimeSettings(BaseModel):
     schema_version: int = 1
     history_depth: int = Field(default=20, ge=0)
 
+class VectorMemoryConfig(BaseModel):
+    enabled: bool = False
+    api_url: str = ""
+    api_key: str = ""
+    model: str = "BAAI/bge-m3"
+    threshold: float = Field(default=0.3, ge=-1, le=1)
+    max_results: int = Field(default=8, ge=1, le=50)
+    context_depth: int = Field(default=2, ge=1, le=5)
+    separator: str = "---"
+    rerank_enabled: bool = False
+    rerank_url: str = "https://api.siliconflow.cn/v1/rerank"
+    rerank_key: str = ""
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+
+class VectorChunk(BaseModel):
+    id: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    content_sha256: str = ""
+    vector: list[float] | None = None
+
+class VectorLibrary(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    source_format: str = "text"
+    chunks: list[VectorChunk] = Field(default_factory=list)
+
+class VectorMemoryState(BaseModel):
+    schema_version: int = 1
+    config: VectorMemoryConfig = Field(default_factory=VectorMemoryConfig)
+    libraries: list[VectorLibrary] = Field(default_factory=list)
+
 class SttProviderProfile(BaseModel):
     id: str
     name: str
@@ -156,6 +189,7 @@ class SettingsResponse(BaseModel):
     runtime_settings: RuntimeSettings
     provider_profiles: dict[str, Any] = Field(default_factory=dict)
     provider_info: dict[str, str] = Field(default_factory=dict)
+    vector_memory: dict[str, Any] = Field(default_factory=dict)
 
 class ProcessRequest(BaseModel):
     audio_base64: str = ""

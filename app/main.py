@@ -24,6 +24,7 @@ from .models import (
     ProviderActiveUpdate,
     RuntimeSettings,
     SettingsResponse,
+    VectorMemoryState,
 )
 from .pipeline import describe_exception, normalize_voice_reply
 from .prompt_compiler import compile_prompt
@@ -50,6 +51,21 @@ from .provider_store import (
 )
 from .providers import ProviderError, fetch_llm_models, get_providers, test_llm_stream, test_stt_real_request, test_tts_real_request, wav_from_pcm
 from .runtime_settings_store import freeze_runtime_settings, load_runtime_settings, save_runtime_settings
+from .vector_memory_store import (
+    delete_vector_library,
+    freeze_vector_memory,
+    fetch_vector_models,
+    get_embeddings,
+    get_rerank_scores,
+    import_vector_library,
+    list_vector_chunks,
+    preview_vector_import,
+    public_vector_memory,
+    retrieve_vector_memories,
+    save_vector_config,
+    set_vector_library_enabled,
+    vectorize_library,
+)
 from .prompt_store import (
     copy_prompt_preset,
     create_prompt_preset,
@@ -73,6 +89,7 @@ PROVIDER_ROUND_SNAPSHOTS: dict[str, object] = {}
 PROMPT_ROUND_SNAPSHOTS: dict[str, PromptPreset] = {}
 LOREBOOK_ROUND_SNAPSHOTS: dict[str, Lorebook] = {}
 HISTORY_DEPTH_ROUND_SNAPSHOTS: dict[str, int] = {}
+VECTOR_MEMORY_ROUND_SNAPSHOTS: dict[str, VectorMemoryState] = {}
 
 def stash_provider_snapshot(snapshot) -> str:
     snapshot_id = str(uuid.uuid4())
@@ -80,6 +97,7 @@ def stash_provider_snapshot(snapshot) -> str:
     PROMPT_ROUND_SNAPSHOTS[snapshot_id] = freeze_active_prompt_preset()
     LOREBOOK_ROUND_SNAPSHOTS[snapshot_id] = freeze_active_lorebook()
     HISTORY_DEPTH_ROUND_SNAPSHOTS[snapshot_id] = freeze_runtime_settings().history_depth
+    VECTOR_MEMORY_ROUND_SNAPSHOTS[snapshot_id] = freeze_vector_memory()
     return snapshot_id
 
 def take_provider_snapshot(snapshot_id: str):
@@ -114,12 +132,21 @@ def take_history_depth_snapshot(snapshot_id: str) -> int:
         raise ValueError("本轮历史层数快照已失效，请重新录音")
     return snapshot
 
+def take_vector_memory_snapshot(snapshot_id: str) -> VectorMemoryState:
+    if not snapshot_id:
+        return freeze_vector_memory()
+    snapshot = VECTOR_MEMORY_ROUND_SNAPSHOTS.pop(snapshot_id, None)
+    if snapshot is None:
+        raise ValueError("本轮向量记忆快照已失效，请重新录音")
+    return snapshot
+
 async def expire_provider_snapshot(snapshot_id: str) -> None:
     await asyncio.sleep(300)
     PROVIDER_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     PROMPT_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     LOREBOOK_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     HISTORY_DEPTH_ROUND_SNAPSHOTS.pop(snapshot_id, None)
+    VECTOR_MEMORY_ROUND_SNAPSHOTS.pop(snapshot_id, None)
 
 def take_tts_segment(buffer: str, final: bool = False) -> tuple[str, str]:
     """取出适合立即交给 TTS 的自然边界，避免逐 token 合成破坏韵律。"""
@@ -149,11 +176,101 @@ async def get_settings():
         info[kind] = profile["name"] if profile else "未选择"
     llm = next((item for item in public.get("llm_profiles", []) if item["id"] == public.get("active_llm_profile_id")), None)
     info["model"] = llm.get("model", "") if llm else ""
-    return SettingsResponse(version=APP_VERSION, mode="real", prompt_presets=load_prompt_presets(), lorebooks=load_lorebooks(), runtime_settings=load_runtime_settings(), provider_profiles=public, provider_info=info)
+    return SettingsResponse(version=APP_VERSION, mode="real", prompt_presets=load_prompt_presets(), lorebooks=load_lorebooks(), runtime_settings=load_runtime_settings(), provider_profiles=public, provider_info=info, vector_memory=public_vector_memory())
 
 @app.put("/api/runtime-settings", response_model=RuntimeSettings)
 async def update_runtime_settings(value: RuntimeSettings):
     return save_runtime_settings(value)
+
+@app.get("/api/vector-memory")
+async def get_vector_memory():
+    return public_vector_memory()
+
+@app.put("/api/vector-memory/config")
+async def update_vector_memory_config(value: dict):
+    try:
+        return public_vector_memory(save_vector_config(value))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.post("/api/vector-memory/test")
+async def test_vector_memory_provider():
+    state = freeze_vector_memory()
+    try:
+        vector = (await get_embeddings(["WRX 向量连接测试"], state.config))[0]
+        return {"ok": True, "dimensions": len(vector)}
+    except Exception as exc:
+        return {"ok": False, "detail": _safe_provider_detail(exc, state.config.api_key)}
+
+@app.post("/api/vector-memory/models")
+async def vector_memory_models(value: dict):
+    state = freeze_vector_memory()
+    kind = str(value.get("kind") or "embedding")
+    try:
+        if kind == "rerank":
+            models = await fetch_vector_models(state.config.rerank_url, state.config.rerank_key)
+        else:
+            models = await fetch_vector_models(state.config.api_url, state.config.api_key)
+        return {"ok": True, "models": models}
+    except Exception as exc:
+        secret = state.config.rerank_key if kind == "rerank" else state.config.api_key
+        return {"ok": False, "models": [], "detail": _safe_provider_detail(exc, secret)}
+
+@app.post("/api/vector-memory/rerank/test")
+async def test_vector_memory_rerank():
+    state = freeze_vector_memory()
+    try:
+        scores = await get_rerank_scores("test", ["test"], state.config)
+        return {"ok": True, "score": scores[0]}
+    except Exception as exc:
+        return {"ok": False, "detail": _safe_provider_detail(exc, state.config.rerank_key)}
+
+@app.post("/api/vector-memory/import/preview")
+async def preview_vector_memory_import(value: dict):
+    try:
+        return preview_vector_import(str(value.get("text") or ""), str(value.get("filename") or ""), str(value.get("separator") or "---"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.post("/api/vector-memory/import")
+async def commit_vector_memory_import(value: dict):
+    try:
+        state, library = import_vector_library(str(value.get("name") or ""), str(value.get("text") or ""), str(value.get("filename") or ""), str(value.get("separator") or "---"))
+        return {"state": public_vector_memory(state), "library": {"id": library.id, "name": library.name, "source_format": library.source_format, "chunk_count": len(library.chunks)}}
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.put("/api/vector-memory/libraries/{library_id}/enabled")
+async def toggle_vector_library(library_id: str, value: dict):
+    try:
+        return public_vector_memory(set_vector_library_enabled(library_id, bool(value.get("enabled"))))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.get("/api/vector-memory/libraries/{library_id}/chunks")
+async def get_vector_library_chunks(library_id: str, offset: int = 0, limit: int = 20, query: str = ""):
+    try:
+        return list_vector_chunks(library_id, offset, limit, query)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.delete("/api/vector-memory/libraries/{library_id}")
+async def remove_vector_library(library_id: str):
+    try:
+        return public_vector_memory(delete_vector_library(library_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.post("/api/vector-memory/libraries/{library_id}/vectorize")
+async def run_vectorization(library_id: str):
+    try:
+        state, report = await vectorize_library(library_id)
+        return {"state": public_vector_memory(state), "report": report}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        state = freeze_vector_memory()
+        raise HTTPException(status_code=502, detail=_safe_provider_detail(exc, state.config.api_key)) from exc
 
 @app.get("/api/prompt-presets")
 async def get_prompt_presets():
@@ -430,7 +547,7 @@ async def update_conversation(conversation_id: str, value: ConversationUpdate):
 async def process_stream(request: ProcessRequest):
     async def events():
         started = perf_counter()
-        latency = {"recording": 0.0, "stt": 0.0, "llm": 0.0, "tts": 0.0, "audio_playback_preparation": 0.0, "total": 0.0}
+        latency = {"recording": 0.0, "stt": 0.0, "vector_retrieval": 0.0, "llm": 0.0, "tts": 0.0, "audio_playback_preparation": 0.0, "total": 0.0}
         stage = "setup"
         tts = None
         preset = None
@@ -469,6 +586,7 @@ async def process_stream(request: ProcessRequest):
             active_prompt_preset = take_prompt_snapshot(request.provider_snapshot_id)
             active_lorebook = take_lorebook_snapshot(request.provider_snapshot_id)
             history_depth = take_history_depth_snapshot(request.provider_snapshot_id)
+            vector_memory = take_vector_memory_snapshot(request.provider_snapshot_id)
             stt, llm, tts = get_providers(provider_snapshot)
             set_generation_parameters = getattr(llm, "set_generation_parameters", None)
             if callable(set_generation_parameters):
@@ -488,7 +606,21 @@ async def process_stream(request: ProcessRequest):
                 return
             yield f"data: {json.dumps({'type': 'transcript', 'text': transcript}, ensure_ascii=False)}\n\n"
             history = [m for m in request.messages if m.role in {'user', 'assistant'}]
-            compiled = compile_prompt(active_prompt_preset, active_lorebook, history_depth, history, transcript)
+            vector_results = []
+            vector_error = ""
+            vector_started = perf_counter()
+            try:
+                context_count = max(0, vector_memory.config.context_depth - 1)
+                query_parts = [message.content for message in history[-context_count:]] if context_count else []
+                query_parts.append(transcript)
+                vector_query = "\n".join(query_parts)
+                vector_results = await retrieve_vector_memories(vector_query, vector_memory)
+            except Exception as exc:
+                vector_error = _safe_provider_detail(exc, vector_memory.config.api_key)
+            latency["vector_retrieval"] = perf_counter() - vector_started
+            compiled = compile_prompt(active_prompt_preset, active_lorebook, history_depth, history, transcript, vector_results)
+            if vector_error:
+                compiled.trace["vector_memory"]["error"] = vector_error
             compiled.trace["generation_parameters"] = getattr(
                 llm, "generation_parameter_report", {"applied": {}, "ignored": {}}
             )

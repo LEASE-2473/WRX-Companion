@@ -147,6 +147,7 @@ def compile_prompt(
     history_depth: int,
     history: list[ChatMessage],
     current_user_message: str,
+    vector_memories: list[dict[str, Any]] | None = None,
 ) -> PromptCompileResult:
     """编译最终 OpenAI-compatible messages，并返回同源 Trace。"""
     if history_depth < 0:
@@ -187,6 +188,18 @@ def compile_prompt(
             sequence += 1
         else:
             marker_entries[destination].append((index, compiled_entry))
+
+    recalled = vector_memories or []
+    if recalled:
+        memory_content = "[向量记忆召回｜仅作为相关背景参考]\n" + "\n\n".join(
+            f"[{index}] {item.get('content', '').strip()}"
+            for index, item in enumerate(recalled, 1)
+            if str(item.get("content", "")).strip()
+        )
+        if memory_content.strip() != "[向量记忆召回｜仅作为相关背景参考]":
+            # depth=1 表示插在当前 user 之前，保持召回内容为独立 system 消息。
+            injections.append(_Injection("vector_memory", "retrieved", "system", memory_content, 1, -1000, sequence))
+            sequence += 1
 
     definitions = {item.identifier: item for item in preset.prompts}
     prompt_order_trace: list[dict[str, Any]] = []
@@ -278,6 +291,23 @@ def compile_prompt(
         "macro_expansions": macro_expansions,
         "markers": marker_trace,
         "lorebook_activation": activation_trace,
+        "vector_memory": {
+            "retrieved_count": len(recalled),
+            "results": [
+                {
+                    "library_id": item.get("library_id"),
+                    "library_name": item.get("library_name"),
+                    "chunk_id": item.get("chunk_id"),
+                    "score": item.get("score"),
+                    "vector_score": item.get("vector_score"),
+                    "rerank_score": item.get("rerank_score"),
+                    "rerank_status": item.get("rerank_status"),
+                    "rerank_error": item.get("rerank_error"),
+                    "metadata": item.get("metadata", {}),
+                }
+                for item in recalled
+            ],
+        },
         "in_chat": injection_trace,
         "history": {
             "requested_layers": history_depth,
