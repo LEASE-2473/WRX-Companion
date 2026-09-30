@@ -1,21 +1,16 @@
 import base64
 import asyncio
-import hashlib
 import json
 import logging
 import uuid
 from time import perf_counter
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import APP_VERSION
-from .conversation_store import create_conversation, list_conversations, save_conversation
 from .models import (
-    ChatMessage,
-    ConversationRecord,
-    ConversationUpdate,
     Lorebook,
     LorebookActiveUpdate,
     ProcessRequest,
@@ -24,10 +19,8 @@ from .models import (
     ProviderActiveUpdate,
     RuntimeSettings,
     SettingsResponse,
-    VectorMemoryState,
 )
-from .pipeline import describe_exception, normalize_voice_reply
-from .prompt_compiler import compile_prompt
+from .pipeline import describe_exception
 from .lorebook_store import (
     copy_lorebook,
     create_lorebook,
@@ -44,12 +37,11 @@ from .provider_store import (
     delete_provider_profile,
     freeze_active_provider_snapshot,
     get_profile,
-    provider_snapshot_public,
     public_provider_profiles,
     set_active_provider_profile,
     upsert_provider_profile,
 )
-from .providers import ProviderError, fetch_llm_models, get_providers, test_llm_stream, test_stt_real_request, test_tts_real_request, wav_from_pcm
+from .providers import fetch_llm_models, get_providers, test_llm_stream, test_stt_real_request, test_tts_real_request
 from .runtime_settings_store import freeze_runtime_settings, load_runtime_settings, save_runtime_settings
 from .vector_memory_store import (
     delete_vector_library,
@@ -61,7 +53,6 @@ from .vector_memory_store import (
     list_vector_chunks,
     preview_vector_import,
     public_vector_memory,
-    retrieve_vector_memories,
     save_vector_config,
     set_vector_library_enabled,
     vectorize_library,
@@ -81,15 +72,32 @@ from .prompt_store import (
 )
 
 logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="WRX Voice Agent", version=APP_VERSION)
+from contextlib import asynccontextmanager
+from .companion_core import core
+from .companion_routes import router as companion_router, stream_job, api_error
+from . import companion_store
+from .heartbeat import run_scheduler
+from .providers import VolcengineStt
+
+@asynccontextmanager
+async def lifespan(app):
+    companion_store.recover_interrupted()
+    scheduler = asyncio.create_task(run_scheduler())
+    try:
+        yield
+    finally:
+        scheduler.cancel()
+        await asyncio.gather(scheduler, return_exceptions=True)
+        await core.shutdown()
+
+app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)
+app.include_router(companion_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
-LLM_FAILURE_SPOKEN_TEXT = "对不起老板……我的脑子刚刚卡了一下，你能不能再说一次？"
 PROVIDER_ROUND_SNAPSHOTS: dict[str, object] = {}
 PROMPT_ROUND_SNAPSHOTS: dict[str, PromptPreset] = {}
 LOREBOOK_ROUND_SNAPSHOTS: dict[str, Lorebook] = {}
 HISTORY_DEPTH_ROUND_SNAPSHOTS: dict[str, int] = {}
-VECTOR_MEMORY_ROUND_SNAPSHOTS: dict[str, VectorMemoryState] = {}
 
 def stash_provider_snapshot(snapshot) -> str:
     snapshot_id = str(uuid.uuid4())
@@ -97,7 +105,6 @@ def stash_provider_snapshot(snapshot) -> str:
     PROMPT_ROUND_SNAPSHOTS[snapshot_id] = freeze_active_prompt_preset()
     LOREBOOK_ROUND_SNAPSHOTS[snapshot_id] = freeze_active_lorebook()
     HISTORY_DEPTH_ROUND_SNAPSHOTS[snapshot_id] = freeze_runtime_settings().history_depth
-    VECTOR_MEMORY_ROUND_SNAPSHOTS[snapshot_id] = freeze_vector_memory()
     return snapshot_id
 
 def take_provider_snapshot(snapshot_id: str):
@@ -132,36 +139,13 @@ def take_history_depth_snapshot(snapshot_id: str) -> int:
         raise ValueError("本轮历史层数快照已失效，请重新录音")
     return snapshot
 
-def take_vector_memory_snapshot(snapshot_id: str) -> VectorMemoryState:
-    if not snapshot_id:
-        return freeze_vector_memory()
-    snapshot = VECTOR_MEMORY_ROUND_SNAPSHOTS.pop(snapshot_id, None)
-    if snapshot is None:
-        raise ValueError("本轮向量记忆快照已失效，请重新录音")
-    return snapshot
-
 async def expire_provider_snapshot(snapshot_id: str) -> None:
     await asyncio.sleep(300)
     PROVIDER_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     PROMPT_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     LOREBOOK_ROUND_SNAPSHOTS.pop(snapshot_id, None)
     HISTORY_DEPTH_ROUND_SNAPSHOTS.pop(snapshot_id, None)
-    VECTOR_MEMORY_ROUND_SNAPSHOTS.pop(snapshot_id, None)
 
-def take_tts_segment(buffer: str, final: bool = False) -> tuple[str, str]:
-    """取出适合立即交给 TTS 的自然边界，避免逐 token 合成破坏韵律。"""
-    if final:
-        return buffer, ""
-    for index, char in enumerate(buffer):
-        if char in "。！？!?；;\n" and index >= 5:
-            return buffer[:index + 1], buffer[index + 1:]
-    if len(buffer) >= 32:
-        boundary = max(buffer.rfind(mark, 12, 33) for mark in "，,、：:")
-        if boundary >= 12:
-            return buffer[:boundary + 1], buffer[boundary + 1:]
-    if len(buffer) >= 48:
-        return buffer[:48], buffer[48:]
-    return "", buffer
 @app.get("/")
 async def index():
     return FileResponse(STATIC / "index.html")
@@ -335,6 +319,8 @@ async def save_prompt_preset(preset_id: str, value: PromptPreset):
 
 @app.delete("/api/prompt-presets/{preset_id}")
 async def remove_prompt_preset(preset_id: str):
+    if any(char.preset_id == preset_id for char in companion_store.list_characters()):
+        raise HTTPException(status_code=409, detail="该预设已绑定角色，请先解除角色绑定")
     try:
         return delete_prompt_preset(preset_id)
     except KeyError as exc:
@@ -399,6 +385,8 @@ async def save_lorebook(lorebook_id: str, value: Lorebook):
 
 @app.delete("/api/lorebooks/{lorebook_id}")
 async def remove_lorebook(lorebook_id: str):
+    if any(char.lorebook_id == lorebook_id for char in companion_store.list_characters()):
+        raise HTTPException(status_code=409, detail="该世界书已绑定角色，请先解除角色绑定")
     try:
         return delete_lorebook(lorebook_id)
     except KeyError as exc:
@@ -467,6 +455,10 @@ async def save_provider_profile(kind: str, profile_id: str, value: dict):
 
 @app.delete("/api/provider-profiles/{kind}/{profile_id}")
 async def remove_provider_profile(kind: str, profile_id: str):
+    if kind == "llm" and any(char.llm_profile_id == profile_id for char in companion_store.list_characters()):
+        raise HTTPException(status_code=409, detail="该 LLM 已绑定角色，请先解除角色绑定")
+    if kind == "tts" and any(char.tts_profile_id == profile_id for char in companion_store.list_characters()):
+        raise HTTPException(status_code=409, detail="该 TTS 已绑定角色，请先解除角色绑定")
     return public_provider_profiles(delete_provider_profile(_provider_kind(kind), profile_id))
 
 @app.put("/api/provider-profiles/active/{kind}/select")
@@ -479,7 +471,10 @@ async def activate_provider_profile(kind: str, value: ProviderActiveUpdate):
 @app.post("/api/provider-profiles/llm/{profile_id}/models")
 async def provider_models(profile_id: str):
     try:
-        profile = get_profile("llm", profile_id)
+        try:
+            profile = get_profile("llm", profile_id)
+        except KeyError:
+            return _configuration_failure("该 Profile 尚未保存或已被删除，请保存当前配置后重试", models=True)
         problem = _configuration_problem("llm", profile, require_llm_model=False)
         if problem:
             return _configuration_failure(problem, models=True)
@@ -492,7 +487,10 @@ async def provider_models(profile_id: str):
 @app.post("/api/provider-profiles/llm/{profile_id}/test")
 async def test_llm_provider(profile_id: str):
     try:
-        profile = get_profile("llm", profile_id)
+        try:
+            profile = get_profile("llm", profile_id)
+        except KeyError:
+            return _configuration_failure("该 Profile 尚未保存或已被删除，请保存当前配置后重试")
         problem = _configuration_problem("llm", profile)
         if problem:
             return _configuration_failure(problem)
@@ -505,7 +503,10 @@ async def test_llm_provider(profile_id: str):
 @app.post("/api/provider-profiles/stt/{profile_id}/test")
 async def test_stt_provider(profile_id: str):
     try:
-        profile = get_profile("stt", profile_id)
+        try:
+            profile = get_profile("stt", profile_id)
+        except KeyError:
+            return _configuration_failure("该 Profile 尚未保存或已被删除，请保存当前配置后重试")
         problem = _configuration_problem("stt", profile)
         if problem:
             return _configuration_failure(problem)
@@ -518,7 +519,10 @@ async def test_stt_provider(profile_id: str):
 @app.post("/api/provider-profiles/tts/{profile_id}/test")
 async def test_tts_provider(profile_id: str):
     try:
-        profile = get_profile("tts", profile_id)
+        try:
+            profile = get_profile("tts", profile_id)
+        except KeyError:
+            return _configuration_failure("该 Profile 尚未保存或已被删除，请保存当前配置后重试")
         problem = _configuration_problem("tts", profile)
         if problem:
             return _configuration_failure(problem)
@@ -528,286 +532,32 @@ async def test_tts_provider(profile_id: str):
         secret = getattr(locals().get("profile"), "api_key", "")
         return _probe_failure(_safe_provider_detail(exc, secret))
 
-@app.get("/api/conversations", response_model=list[ConversationRecord])
-async def get_conversations():
-    return list_conversations()
-
-@app.post("/api/conversations", response_model=ConversationRecord)
-async def new_conversation():
-    return create_conversation()
-
-@app.put("/api/conversations/{conversation_id}", response_model=ConversationRecord)
-async def update_conversation(conversation_id: str, value: ConversationUpdate):
-    saved = save_conversation(conversation_id, value.messages)
-    if saved is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return saved
-
 @app.post("/api/process/stream")
 async def process_stream(request: ProcessRequest):
-    async def events():
-        started = perf_counter()
-        latency = {"recording": 0.0, "stt": 0.0, "vector_retrieval": 0.0, "llm": 0.0, "tts": 0.0, "audio_playback_preparation": 0.0, "total": 0.0}
-        stage = "setup"
-        tts = None
-        preset = None
-        prompt_tokens_metric = None
-
-        async def emit_failure(detail: str):
-            if stage == "llm" and tts is not None and preset is not None:
-                try:
-                    fallback_audio = await tts.synthesize(LLM_FAILURE_SPOKEN_TEXT, preset)
-                    if fallback_audio:
-                        payload = {
-                            "type": "failure",
-                            "detail": detail,
-                            "spoken_text": LLM_FAILURE_SPOKEN_TEXT,
-                            "audio_base64": base64.b64encode(fallback_audio).decode(),
-                            "audio_mime": "audio/wav",
-                            "latency": latency,
-                            "prompt_tokens": prompt_tokens_metric,
-                        }
-                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                        return
-                except Exception as fallback_exc:
-                    detail = f"{detail}；错误提示语音生成也失败：{describe_exception(fallback_exc)}"
-            payload = {"type": "error", "detail": detail}
-            if prompt_tokens_metric is not None:
-                payload["prompt_tokens"] = prompt_tokens_metric
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-        try:
-            audio = base64.b64decode(request.audio_base64) if request.audio_base64 else b""
-            transcript = request.transcript.strip()
-            if not transcript and len(audio) < 44:
-                yield f"data: {json.dumps({'type': 'error', 'detail': 'No speech detected'}, ensure_ascii=False)}\n\n"
-                return
-            provider_snapshot = take_provider_snapshot(request.provider_snapshot_id)
-            active_prompt_preset = take_prompt_snapshot(request.provider_snapshot_id)
-            active_lorebook = take_lorebook_snapshot(request.provider_snapshot_id)
-            history_depth = take_history_depth_snapshot(request.provider_snapshot_id)
-            vector_memory = take_vector_memory_snapshot(request.provider_snapshot_id)
-            stt, llm, tts = get_providers(provider_snapshot)
-            set_generation_parameters = getattr(llm, "set_generation_parameters", None)
-            if callable(set_generation_parameters):
-                set_generation_parameters(active_prompt_preset.generation_parameters)
-            preset = provider_snapshot.tts
-            latency["recording"] = request.recording_duration if transcript else max(0.0, (len(audio) - 44) / (16000 * 2))
-            stage = "stt"
-            if transcript:
-                latency["stt"] = max(0.0, request.stt_latency)
-            else:
-                yield f"data: {json.dumps({'type': 'state', 'state': 'Transcribing'}, ensure_ascii=False)}\n\n"
-                stt_started = perf_counter()
-                transcript = await stt.transcribe(audio)
-                latency["stt"] = perf_counter() - stt_started
-            if not transcript.strip():
-                yield f"data: {json.dumps({'type': 'error', 'detail': 'No speech detected'}, ensure_ascii=False)}\n\n"
-                return
-            yield f"data: {json.dumps({'type': 'transcript', 'text': transcript}, ensure_ascii=False)}\n\n"
-            history = [m for m in request.messages if m.role in {'user', 'assistant'}]
-            vector_results = []
-            vector_error = ""
-            vector_started = perf_counter()
-            try:
-                context_count = max(0, vector_memory.config.context_depth - 1)
-                query_parts = [message.content for message in history[-context_count:]] if context_count else []
-                query_parts.append(transcript)
-                vector_query = "\n".join(query_parts)
-                vector_results = await retrieve_vector_memories(vector_query, vector_memory)
-            except Exception as exc:
-                vector_error = _safe_provider_detail(exc, vector_memory.config.api_key)
-            latency["vector_retrieval"] = perf_counter() - vector_started
-            compiled = compile_prompt(active_prompt_preset, active_lorebook, history_depth, history, transcript, vector_results)
-            if vector_error:
-                compiled.trace["vector_memory"]["error"] = vector_error
-            compiled.trace["generation_parameters"] = getattr(
-                llm, "generation_parameter_report", {"applied": {}, "ignored": {}}
-            )
-            llm_messages = compiled.messages
-            prompt_tokens_metric = {
-                "value": compiled.prompt_token_estimate,
-                "source": "estimate",
-                "label": "估算",
-            }
-            pieces: list[str] = []
-            llm_started = perf_counter()
-            first_token_latency = None
-            yield f"data: {json.dumps({'type': 'state', 'state': 'Thinking'}, ensure_ascii=False)}\n\n"
-            stage = "llm"
-            audio_pcm = bytearray()
-            tts_error = ""
-            first_segment_latency = None
-            first_audio_latency = None
-            streaming_pcm = getattr(tts, "supports_streaming_pcm", lambda _preset: False)(preset)
-
-            if streaming_pcm:
-                event_queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
-                text_queue: asyncio.Queue[str | None] = asyncio.Queue()
-                tts_handoff_at = None
-
-                async def text_stream():
-                    while True:
-                        item = await text_queue.get()
-                        if item is None:
-                            break
-                        yield item
-
-                async def produce_llm():
-                    nonlocal first_token_latency, first_segment_latency, tts_handoff_at
-                    buffer = ""
-                    try:
-                        async for piece in llm.stream_complete(llm_messages):
-                            if first_token_latency is None:
-                                first_token_latency = perf_counter() - llm_started
-                            pieces.append(piece)
-                            buffer += piece
-                            await event_queue.put(("delta", piece))
-                            while True:
-                                segment, buffer = take_tts_segment(buffer)
-                                if not segment:
-                                    break
-                                spoken = normalize_voice_reply(segment).strip()
-                                if spoken:
-                                    if tts_handoff_at is None:
-                                        tts_handoff_at = perf_counter()
-                                        first_segment_latency = tts_handoff_at - llm_started
-                                    await text_queue.put(spoken)
-                        tail, _ = take_tts_segment(buffer, final=True)
-                        spoken = normalize_voice_reply(tail).strip()
-                        if spoken:
-                            if tts_handoff_at is None:
-                                tts_handoff_at = perf_counter()
-                                first_segment_latency = tts_handoff_at - llm_started
-                            await text_queue.put(spoken)
-                    except Exception as exc:
-                        await event_queue.put(("fatal", exc))
-                    finally:
-                        latency["llm"] = perf_counter() - llm_started
-                        await text_queue.put(None)
-                        await event_queue.put(("llm_done", None))
-
-                async def produce_tts():
-                    nonlocal tts_error, first_audio_latency
-                    try:
-                        async for chunk in tts.stream_pcm(text_stream(), preset):
-                            if first_audio_latency is None:
-                                now = perf_counter()
-                                first_audio_latency = now - (tts_handoff_at or llm_started)
-                                latency["response_to_first_audio"] = request.stt_latency + now - started
-                            audio_pcm.extend(chunk)
-                            await event_queue.put(("audio", chunk))
-                    except Exception as exc:
-                        tts_error = describe_exception(exc)
-                    finally:
-                        latency["tts"] = max(0.0, perf_counter() - (tts_handoff_at or llm_started))
-                        await event_queue.put(("tts_done", None))
-
-                llm_task = asyncio.create_task(produce_llm())
-                tts_task = asyncio.create_task(produce_tts())
-                llm_done = tts_done = False
-                try:
-                    while not (llm_done and tts_done):
-                        kind, value = await event_queue.get()
-                        if kind == "delta":
-                            yield f"data: {json.dumps({'type': 'delta', 'text': value}, ensure_ascii=False)}\n\n"
-                        elif kind == "audio":
-                            payload = {'type': 'audio_chunk', 'audio_base64': base64.b64encode(value).decode(), 'sample_rate': 24000}
-                            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                        elif kind == "llm_done":
-                            llm_done = True
-                        elif kind == "tts_done":
-                            tts_done = True
-                        elif kind == "fatal":
-                            raise value
-                    await asyncio.gather(llm_task, tts_task)
-                finally:
-                    for task in (llm_task, tts_task):
-                        if not task.done():
-                            task.cancel()
-            else:
-                async for piece in llm.stream_complete(llm_messages):
-                    if first_token_latency is None:
-                        first_token_latency = perf_counter() - llm_started
-                    pieces.append(piece)
-                    yield f"data: {json.dumps({'type': 'delta', 'text': piece}, ensure_ascii=False)}\n\n"
-                latency["llm"] = perf_counter() - llm_started
-
-            provider_prompt_tokens = getattr(llm, "last_prompt_tokens", None)
-            if isinstance(provider_prompt_tokens, int) and not isinstance(provider_prompt_tokens, bool) and provider_prompt_tokens >= 0:
-                prompt_tokens_metric = {
-                    "value": provider_prompt_tokens,
-                    "source": "provider",
-                    "label": "Provider 实际",
-                }
-            compiled.trace["prompt_tokens"] = prompt_tokens_metric
-
-            reply = normalize_voice_reply(''.join(pieces))
-            if not reply:
-                raise ProviderError("LLM 未返回可朗读正文")
-            messages = history + [ChatMessage(role='user', content=transcript), ChatMessage(role='assistant', content=reply)]
-            stage = "tts"
-            if audio_pcm:
-                audio_bytes = wav_from_pcm(bytes(audio_pcm), 24000)
-            elif streaming_pcm:
-                # 流式 TTS 偶发正常结束但不返回音频。用完整文本新建一次会话兜底；
-                # 仍失败时返回明确的 TTS 错误，绝不让前端播放空 WAV。
-                yield f"data: {json.dumps({'type': 'state', 'state': 'Generating Voice'}, ensure_ascii=False)}\n\n"
-                retry_started = perf_counter()
-                try:
-                    audio_bytes = await tts.synthesize(reply, preset)
-                    if not audio_bytes:
-                        raise ProviderError("TTS 未返回音频")
-                except Exception as exc:
-                    audio_bytes = b""
-                    tts_error = describe_exception(exc)
-                latency["tts"] += perf_counter() - retry_started
-            else:
-                yield f"data: {json.dumps({'type': 'state', 'state': 'Generating Voice'}, ensure_ascii=False)}\n\n"
-                tts_started = perf_counter()
-                try:
-                    audio_bytes = await tts.synthesize(reply, preset)
-                except Exception as exc:
-                    audio_bytes = b""
-                    tts_error = describe_exception(exc)
-                latency["tts"] = perf_counter() - tts_started
-            latency["total"] = request.stt_latency + perf_counter() - started
-            if first_token_latency is not None:
-                latency["llm_first_token"] = first_token_latency
-            if first_segment_latency is not None:
-                latency["llm_first_tts_segment"] = first_segment_latency
-            if first_audio_latency is not None:
-                latency["tts_first_audio"] = first_audio_latency
-            debug = {
-                "llm_messages": [message.model_dump() for message in llm_messages],
-                "llm_raw": ''.join(pieces),
-                "normalized_reply": reply,
-                "tts_input": reply,
-                "prompt_trace": compiled.trace,
-                "prompt_tokens": prompt_tokens_metric,
-                "provider": provider_snapshot_public(provider_snapshot),
-                "prompt_sha256": hashlib.sha256(json.dumps(compiled.trace["final_messages"], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()[:12],
-            }
-            if first_token_latency is not None:
-                debug["llm_first_token_latency"] = first_token_latency
-            if tts_error:
-                debug["tts_error"] = tts_error
-            if not audio_bytes and not tts_error:
-                tts_error = "TTS 未返回音频"
-                debug["tts_error"] = tts_error
-            payload = {'type': 'complete', 'transcript': transcript, 'reply': reply, 'audio_base64': base64.b64encode(audio_bytes).decode(), 'audio_mime': 'audio/wav', 'audio_streamed': bool(audio_pcm), 'messages': [m.model_dump() for m in messages], 'latency': latency, 'prompt_tokens': prompt_tokens_metric, 'debug': debug, 'error': tts_error}
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        except ProviderError as exc:
-            async for event in emit_failure(str(exc)):
-                yield event
-        except Exception as exc:
-            snapshot = locals().get("provider_snapshot")
-            secrets = [getattr(getattr(snapshot, kind, None), "api_key", "") for kind in ("stt", "llm", "tts")]
-            safe_detail = _safe_provider_detail(exc, *secrets)
-            logging.error("stream pipeline failed: %s", safe_detail)
-            async for event in emit_failure(f"处理失败：{safe_detail}"):
-                yield event
-    return StreamingResponse(events(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+    if not request.conversation_id or not request.request_id:
+        raise HTTPException(status_code=422, detail="语音请求需要 conversation_id 与 request_id")
+    try:
+        companion_store.get_conversation(request.conversation_id)
+        companion_store.valid_timezone(request.timezone)
+        snapshot = take_provider_snapshot(request.provider_snapshot_id)
+        preset = take_prompt_snapshot(request.provider_snapshot_id)
+        lorebook = take_lorebook_snapshot(request.provider_snapshot_id)
+        take_history_depth_snapshot(request.provider_snapshot_id)
+        transcript = request.transcript.strip()
+        if not transcript:
+            audio = base64.b64decode(request.audio_base64, validate=True)
+            if len(audio) < 44:
+                raise ValueError("No speech detected")
+            transcript = await VolcengineStt(snapshot.stt).transcribe(audio)
+        if not transcript.strip():
+            raise ValueError("No speech detected")
+        job = core.submit(request.conversation_id, request.request_id, transcript, request.timezone,
+                          "voice", request.search_mode, snapshot, preset, lorebook)
+        return stream_job(job)
+    except (ValueError, KeyError) as exc:
+        raise api_error(exc) from exc
+    except Exception:
+        raise HTTPException(status_code=502, detail="语音识别失败，请检查 STT 配置") from None
 
 @app.websocket("/api/stt/stream")
 async def stream_stt(websocket: WebSocket):

@@ -1,17 +1,134 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import base64
+import binascii
+
+def validate_images(images):
+    for url in images:
+        header, sep, encoded = url.partition(',')
+        if not sep or header not in {'data:image/png;base64', 'data:image/jpeg;base64', 'data:image/webp;base64', 'data:image/gif;base64'}:
+            raise ValueError('只支持 PNG、JPEG、WebP、GIF 图片')
+        if len(encoded) > 7_000_000:
+            raise ValueError('每张图片最多 5 MB')
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError('图片编码无效') from exc
+        if not raw or len(raw) > 5 * 1024 * 1024:
+            raise ValueError('每张图片必须非空且不超过 5 MB')
+        valid = {'data:image/png;base64': raw.startswith(b'\x89PNG\r\n\x1a\n'),
+                 'data:image/jpeg;base64': raw.startswith(b'\xff\xd8\xff'),
+                 'data:image/gif;base64': raw[:6] in (b'GIF87a', b'GIF89a'),
+                 'data:image/webp;base64': raw[:4] == b'RIFF' and raw[8:12] == b'WEBP'}
+        if not valid[header]:
+            raise ValueError('图片格式与内容不匹配')
+    return images
+
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+    images: list[str] = Field(default_factory=list, max_length=4)
+    _validate_images = field_validator('images')(validate_images)
+
+    def api_message(self):
+        content = self.content
+        if self.images:
+            content = ([{'type': 'text', 'text': content}] if content else []) + [
+                {'type': 'image_url', 'image_url': {'url': url}} for url in self.images]
+        return {'role': self.role, 'content': content}
+
+class TokenUsage(BaseModel):
+    input_tokens: int | None = None
+    cached_tokens: int | None = None
+    output_tokens: int | None = None
+
+class StoredMessage(ChatMessage):
+    id: str
+    timestamp: str
+    timezone: str = "Asia/Shanghai"
+    local_datetime: str
+    source: str = "web"
+    request_id: str | None = None
+    usage: TokenUsage | None = None
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+
+class Character(BaseModel):
+    id: str = ""
+    name: str = Field(default="新角色", min_length=1, max_length=100)
+    personality: str = ""
+    background: str = ""
+    relationship: str = ""
+    speaking_style: str = ""
+    system_prompt: str = ""
+    persona: str = ""
+    user_name: str = "用户"
+    preset_id: str | None = None
+    lorebook_id: str | None = None
+    llm_profile_id: str | None = None
+    tts_profile_id: str | None = None
+
+class MessageBranch(BaseModel):
+    action: Literal["branch", "edit", "regenerate"] = "branch"
+    content: str | None = Field(default=None, min_length=1, max_length=100000)
+
+class MessageSpeech(BaseModel):
+    profile_id: str | None = None
+
+class HeartbeatSettings(BaseModel):
+    enabled: bool = False
+    interval_minutes: int = Field(default=30, ge=1, le=1440)
+    cooldown_minutes: int = Field(default=30, ge=0, le=1440)
+    max_messages_per_day: int = Field(default=6, ge=1, le=100)
+    quiet_enabled: bool = False
+    quiet_start: int = Field(default=23, ge=0, le=23)
+    quiet_end: int = Field(default=8, ge=0, le=23)
+
+class SearchSettings(BaseModel):
+    enabled: bool = False
+    provider: Literal["tavily", "searxng", "volcengine", "custom"] = "tavily"
+    endpoint: str = "https://api.tavily.com/search"
+    api_key: str = ""
+    max_results: int = Field(default=5, ge=1, le=10)
+    search_depth: Literal["basic", "advanced"] = "basic"
+    request_method: Literal["GET", "POST"] = "POST"
+    request_template: dict = Field(default_factory=lambda: {"query": "{{query}}", "max_results": "{{max_results}}"})
+    auth_header: str = "Authorization"
+    auth_prefix: str = "Bearer "
+    results_path: str = "results"
+    title_path: str = "title"
+    url_path: str = "url"
+    content_path: str = "content"
+    extra_body: dict = Field(default_factory=dict)
+
+
+class ConversationCreate(BaseModel):
+    character_id: str = "default"
+    name: str = ""
+    timezone: str = "Asia/Shanghai"
+
+class TextTurn(BaseModel):
+    request_id: str = Field(min_length=1, max_length=100)
+    content: str = Field(default='', max_length=100000)
+    images: list[str] = Field(default_factory=list, max_length=4)
+    _validate_images = field_validator('images')(validate_images)
+    timezone: str = "Asia/Shanghai"
+    search_mode: Literal["AUTO", "ON", "OFF"] = "AUTO"
 
 class ConversationRecord(BaseModel):
     id: str
     name: str
     created_at: str
     updated_at: str
-    messages: list[ChatMessage] = Field(default_factory=list)
+    messages: list[StoredMessage] = Field(default_factory=list)
+    character_id: str = "default"
+    timezone: str = "Asia/Shanghai"
+    heartbeat: HeartbeatSettings = Field(default_factory=HeartbeatSettings)
+    next_heartbeat_at: str | None = None
+    pending_request_id: str | None = None
+    parent_conversation_id: str | None = None
+    branch_message_id: str | None = None
 
 class ConversationUpdate(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
@@ -192,6 +309,10 @@ class SettingsResponse(BaseModel):
     vector_memory: dict[str, Any] = Field(default_factory=dict)
 
 class ProcessRequest(BaseModel):
+    conversation_id: str = ""
+    request_id: str = ""
+    timezone: str = "Asia/Shanghai"
+    search_mode: Literal["AUTO", "ON", "OFF"] = "AUTO"
     audio_base64: str = ""
     transcript: str = ""
     stt_latency: float = 0.0

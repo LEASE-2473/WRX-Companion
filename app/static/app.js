@@ -40,7 +40,7 @@ let inspectedVectorLibraryId = null;
 let vectorChunkOffset = 0;
 const VECTOR_CHUNK_PAGE_SIZE = 20;
 
-function status(value) { $('status').textContent = value; }
+function status(value) { const indicator = $('status'); if (indicator) indicator.textContent = value; }
 function microphoneIsLive() { return Boolean(mediaStream?.getAudioTracks().some(track => track.readyState === 'live')); }
 function releaseMicrophone() { if (microphoneReleaseTimer) clearTimeout(microphoneReleaseTimer); microphoneReleaseTimer = null; if (mediaStream) mediaStream.getTracks().forEach(track => track.stop()); mediaStream = null; }
 function scheduleMicrophoneRelease() { if (microphoneReleaseTimer) clearTimeout(microphoneReleaseTimer); microphoneReleaseTimer = setTimeout(() => { if (!recording && !startPromise) releaseMicrophone(); }, MICROPHONE_WARM_IDLE_MS); }
@@ -425,11 +425,18 @@ function providerPayload(kind) {
   let requestTemplate; try { requestTemplate = JSON.parse($('ttsRequestTemplate').value || '{}'); } catch { throw new Error('TTS Request Template 不是合法 JSON'); }
   return { id: current.id, name: $('ttsName').value.trim(), provider_type: $('ttsProviderType').value, endpoint: $('ttsEndpoint').value.trim(), resource_id: $('ttsResourceId').value.trim(), api_key: $('ttsApiKey').value, voice_type: $('ttsVoiceType').value.trim(), request_template: requestTemplate, emotion: $('ttsEmotion').value.trim(), enable_emotion: $('ttsEnableEmotion').checked, emotion_scale: Number($('ttsEmotionScale').value) || 4, speed_ratio: Number($('ttsSpeedRatio').value) || 1 };
 }
-async function saveProvider(kind) { const payload = providerPayload(kind); providerState(kind, '正在保存…'); settings.provider_profiles = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(payload.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await activateProvider(kind, payload.id); }
+async function persistProviderDraft(kind) {
+  const payload = providerPayload(kind);
+  providerState(kind, '正在保存当前配置…');
+  settings.provider_profiles = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(payload.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  renderProviderProfiles(kind, payload.id);
+  return payload.id;
+}
+async function saveProvider(kind) { const profileId = await persistProviderDraft(kind); await activateProvider(kind, profileId); }
 async function deleteProvider(kind) { const profile = selectedProvider(kind); if (!profile) return; settings.provider_profiles = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profile.id)}`, { method: 'DELETE' }); renderProviderProfiles(kind); providerState(kind, '已删除；当前选择已更新', 'saved'); }
 function formatProbe(result) { return Object.entries(result.stages || {}).map(([name, value]) => `${name}: ${value.status}${value.detail ? `（${value.detail}）` : ''}`).join('；'); }
-async function testProvider(kind) { const profile = selectedProvider(kind); if (!profile) return; providerState(kind, '正在执行真实最小请求…'); const result = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profile.id)}/test`, { method: 'POST' }); providerState(kind, formatProbe(result), result.ok ? 'saved' : 'dirty'); if (kind === 'tts' && result.audio_base64) playAudio({ audio_base64: result.audio_base64, audio_mime: result.audio_mime, latency: {} }); }
-async function fetchModels() { const profile = selectedProvider('llm'); if (!profile) return; providerState('llm', '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profile.id)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || []); providerState('llm', result.ok ? `已拉取 ${result.models.length} 个模型；请从下拉框选择，或手动输入` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
+async function testProvider(kind) { const profileId = await persistProviderDraft(kind); providerState(kind, '正在执行真实最小请求…'); const result = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profileId)}/test`, { method: 'POST' }); providerState(kind, formatProbe(result), result.ok ? 'saved' : 'dirty'); if (kind === 'tts' && result.audio_base64) playAudio({ audio_base64: result.audio_base64, audio_mime: result.audio_mime, latency: {} }); }
+async function fetchModels() { const profileId = await persistProviderDraft('llm'); providerState('llm', '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profileId)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || []); providerState('llm', result.ok ? `已拉取 ${result.models.length} 个模型；请从下拉框选择，或手动输入` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
 
 async function start() {
   if (recording || startPromise || processing) return;
@@ -517,13 +524,16 @@ async function processAudio(wav, streamed = null, requestStarted = performance.n
   setTextInputControlsDisabled(true);
   const requestConversationId = activeConversationId;
   const requestMessages = [...messages];
-  await prepareStreamPlayback(requestStarted);
   status(typedText ? 'Thinking' : 'Transcribing');
   let completed = false;
   try {
-    const body = typedText ? { transcript: typedText, stt_latency: 0, recording_duration: 0, messages: requestMessages } : STT_INTEGRITY_MODE ? { audio_base64: b64(wav), messages: requestMessages } : streamed?.text ? { transcript: streamed.text, stt_latency: streamed.latency, recording_duration: recordingDuration, messages: requestMessages, provider_snapshot_id: streamed.snapshotId || '' } : { audio_base64: b64(wav), messages: requestMessages, provider_snapshot_id: streamed?.snapshotId || '' };
+    await prepareStreamPlayback(requestStarted);
+    let body = typedText ? { transcript: typedText, stt_latency: 0, recording_duration: 0, messages: requestMessages } : STT_INTEGRITY_MODE ? { audio_base64: b64(wav), messages: requestMessages } : streamed?.text ? { transcript: streamed.text, stt_latency: streamed.latency, recording_duration: recordingDuration, messages: requestMessages, provider_snapshot_id: streamed.snapshotId || '' } : { audio_base64: b64(wav), messages: requestMessages, provider_snapshot_id: streamed?.snapshotId || '' };
+    body = {...body, conversation_id: requestConversationId, request_id: crypto.randomUUID(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai', search_mode: $('searchMode').value};
+    delete body.messages;
     const result = await fetch('/api/process/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!result.ok || !result.body) throw new Error('流式接口不可用');
+    if (!result.ok) { const failure = await result.json(); throw new Error(failure.detail || '语音请求失败'); }
+    if (!result.body) throw new Error('流式接口不可用');
     const reader = result.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -531,10 +541,11 @@ async function processAudio(wav, streamed = null, requestStarted = performance.n
     let transcript = '';
     const consume = async payload => {
       if (payload.type === 'state') status(payload.state);
+      if (payload.type === 'search') renderSearchTurn(payload);
       if (payload.type === 'transcript') { transcript = payload.text; addMessage('user', transcript); status('Thinking'); }
-      if (payload.type === 'delta') { if (!assistantNode) { assistantNode = messageNode('assistant', ''); $('chat').prepend(assistantNode); } assistantNode.textContent = `Assistant: ${(assistantNode.textContent.replace(/^Assistant: /, '') || '')}${payload.text}`; }
+      if (payload.type === 'delta') { if (!assistantNode) assistantNode = addMessage('assistant', ''); assistantNode.querySelector('.message-body').textContent += payload.text; scrollChat(); }
       if (payload.type === 'audio_chunk') schedulePcmChunk(payload.audio_base64, payload.sample_rate || 24000);
-      if (payload.type === 'complete') { if (activeConversationId !== requestConversationId) throw new Error('当前对话已切换，本轮结果未写入页面'); messages = payload.messages; renderConversation(); saveLlmDebug(payload.debug); if (streamPlayback?.firstPlaybackAt) payload.latency.actual_first_playback = (streamPlayback.firstPlaybackAt - streamPlayback.requestStarted) / 1000; renderDebug(payload, transcript); await persistConversation(requestConversationId, messages); completed = true; if (payload.audio_streamed) finishStreamPlayback(payload); else { discardPreparedStream(); if (!payload.error && payload.audio_base64) playAudio(payload); } if (payload.error || (!payload.audio_streamed && !payload.audio_base64)) { status('Error'); alert(`语音生成失败，但回复文本已保留：${payload.error || 'TTS 未返回音频'}`); setTimeout(() => status('Idle'), 1500); } }
+      if (payload.type === 'complete') { if (activeConversationId !== requestConversationId) throw new Error('当前对话已切换，本轮结果未写入页面'); messages = payload.messages; renderConversation(); saveLlmDebug(payload.debug); if (streamPlayback?.firstPlaybackAt) payload.latency.actual_first_playback = (streamPlayback.firstPlaybackAt - streamPlayback.requestStarted) / 1000; renderDebug(payload, transcript); await persistConversation(requestConversationId, messages); completed = true; if (payload.audio_streamed) finishStreamPlayback(payload); else { discardPreparedStream(); if (!payload.error && payload.audio_base64) playAudio(payload); } if (payload.error) { status('Error'); alert(`语音生成失败，但回复文本已保留：${payload.error || 'TTS 未返回音频'}`); setTimeout(() => status('Idle'), 1500); } }
       if (payload.type === 'failure') { discardPreparedStream(); renderConversation(); renderDebug(payload); if (payload.audio_base64) playAudio(payload); alert(payload.detail); }
       if (payload.type === 'error') { if (payload.prompt_tokens) renderDebug(payload); throw new Error(payload.detail); }
     };
@@ -759,6 +770,5 @@ function encodePcm16(samples, sampleRate) { const pcm = resample(samples, sample
 function encodeWav(samples, sampleRate) { const pcm = resample(samples, sampleRate, 16000); const outputRate = 16000; const buffer = new ArrayBuffer(44 + pcm.length * 2); const view = new DataView(buffer); const write = (offset, value) => [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0))); write(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); write(8, 'WAVEfmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, outputRate, true); view.setUint32(28, outputRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, pcm.length * 2, true); pcm.forEach((sample, index) => view.setInt16(44 + index * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true)); return new Uint8Array(buffer); }
 updatePlayback();
 setInterval(updatePlayback, 200);
-load();
-void prewarmMicrophoneIfGranted();
+window.addEventListener('DOMContentLoaded', () => void load().catch(error => setConversationState(error.message, 'dirty')));
 window.addEventListener('beforeunload', releaseMicrophone);

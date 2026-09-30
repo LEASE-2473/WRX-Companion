@@ -1,34 +1,84 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>温柔乡 · Voice Agent</title><link rel="stylesheet" href="/static/styles.css?v=20260901-vector-v3"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>温柔乡 · Companion</title><link rel="stylesheet" href="/static/styles.css?v=20261001-companion"></head>
 <body>
-<main>
-  <header class="app-header">
-    <div><span class="eyebrow">WRX · VOICE COMPANION</span><h1>温柔乡 <small id="mode"></small></h1></div>
-    <nav class="manager-nav" aria-label="配置管理">
-      <button class="manager-button" data-open-panel="promptPanel"><span class="manager-icon">P</span><span><strong>Preset</strong><small>提示词编排</small></span></button>
-      <button class="manager-button" data-open-panel="lorebookPanel"><span class="manager-icon">L</span><span><strong>Lorebook</strong><small>世界书管理</small></span></button>
-      <button class="manager-button" data-open-panel="vectorPanel"><span class="manager-icon">V</span><span><strong>Vector</strong><small>向量记忆</small></span></button>
-      <button class="manager-button" data-open-panel="providerPanel"><span class="manager-icon">◈</span><span><strong>Provider</strong><small>模型与语音</small></span></button>
-    </nav>
-  </header>
-  <section class="panel control-panel">
-    <div class="section-heading"><div><span class="section-kicker">PUSH TO TALK</span><h2>和她说点什么</h2></div><span id="status" class="status-pill">Idle</span></div>
-    <div class="hotkey-row"><label>按住说话热键<input id="keyInput" readonly placeholder="点击录制后按下目标键"></label><div class="button-row"><button id="captureKey">录制按键</button><button id="saveKey">保存</button></div></div>
-    <span id="keyState" class="hint"></span><button id="talk" class="talk">按住说话</button>
-    <div class="text-turn-row"><label>文字输入（跳过 STT）<textarea id="textInput" rows="2" placeholder="输入后按 Ctrl + Enter，或点击右侧按钮发送"></textarea></label><button id="sendText" class="primary-button">发送文字</button></div>
-    <span id="textInputState" class="hint">文字会复用当前 Preset、世界书、历史和 TTS，并写入当前对话。</span>
+<link rel="stylesheet" href="/static/chat-ui.css?v=20261001-chat">
+<main class="chat-app">
+  <aside class="chat-sidebar" aria-label="角色与会话">
+    <div class="brand"><span class="brand-mark">乡</span><div><strong>温柔乡</strong><small id="mode">Companion 2.0</small></div></div>
+    <label class="sidebar-label">一起聊天的人<select id="characterSelect"></select></label>
+    <div class="sidebar-buttons"><button data-open-panel="characterPanel">角色设定</button><button id="newConversation">＋ 新对话</button></div>
+    <div class="sidebar-caption">对话记录 <button id="saveConversation" title="刷新会话">↻</button></div>
+    <div id="conversationList" class="conversation-list"></div>
+    <select id="conversationSelect" aria-label="当前会话" hidden></select><button id="clearConversation" hidden>重新开始</button>
+    <nav class="sidebar-settings" aria-label="设置">
+      <button data-open-panel="promptPanel">预设</button><button data-open-panel="lorebookPanel">世界书</button>
+      <button data-open-panel="providerPanel">模型与语音</button><button data-open-panel="searchPanel">联网搜索</button>
+      <button data-open-panel="heartbeatPanel">主动联系</button><button data-open-panel="contextPanel">上下文</button>
+    </nav><span id="conversationState" class="hint"></span>
+  </aside>
+  <section class="chat-workspace">
+    <header class="chat-topbar"><button id="toggleSidebar" aria-label="切换会话侧栏">☰</button><div><h1 id="chatTitle">温柔乡</h1><small id="chatSubtitle">慢慢说，我在听。</small></div></header>
+    <div id="chatScroll" class="chat-scroll"><div id="chat" role="log" aria-label="聊天消息" aria-live="polite"></div></div>
+    <div class="composer-wrap"><span id="searchTurnState" class="hint"></span>
+      <div class="composer"><label class="composer-label"><span class="sr-only">文字输入</span><textarea id="textInput" rows="3" placeholder="和她说点什么…"></textarea></label>
+        <div id="imageDrafts" class="image-drafts"></div><input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+        <div class="composer-toolbar"><button id="attachImages" type="button">图片</button><label class="search-mode-label"><span class="sr-only">本轮联网</span><select id="searchMode"><option value="AUTO">◎ 自动联网</option><option value="ON">◎ 强制搜索</option><option value="OFF">◎ 不联网</option></select></label><button data-open-panel="voicePanel">麦克风</button><span class="composer-spacer"></span><button id="sendText" class="primary-button">发送 ↑</button></div>
+      </div><div class="composer-footer"><span id="conversationSummary"></span><span id="composerUsage" class="composer-usage"></span><span id="textInputState" class="hint">Enter 发送 · Shift + Enter 换行</span></div>
+    </div><button id="toggleConversation" hidden>展开全部</button>
   </section>
-  <section class="panel playback-panel"><div class="section-heading"><div><span class="section-kicker">PLAYBACK</span><h2>语音播放</h2></div><span id="playbackTime">0:00 / 0:00</span></div><input id="playback" type="range" min="0" max="100" value="0" step="0.1" aria-label="播放进度"><div class="button-row"><button id="playPause">播放</button><button id="stopAudio">中断</button></div></section>
-  <section class="panel latency-panel"><div class="section-heading"><div><span class="section-kicker">LATEST TURN</span><h2>本轮响应</h2></div></div><div id="latencyInfo" class="latency-grid">尚无数据</div></section>
-  <section class="panel conversation-panel">
-    <div class="section-heading"><div><span class="section-kicker">CONVERSATION</span><h2>对话</h2></div><button id="toggleConversation" class="subtle-button" hidden>展开全部</button></div>
-    <div class="conversation-controls"><label>本地对话<select id="conversationSelect"></select></label><div class="button-row"><button id="newConversation">新建</button><button id="saveConversation">保存</button><button id="clearConversation" class="danger-button">清空</button></div></div>
-    <span id="conversationState" class="hint"></span><div id="chat"></div><div class="conversation-summary"><span id="conversationSummary"></span></div>
-  </section>
-  <section class="panel compact-debug"><button id="showLlmDebug" disabled>查看上下文调试</button></section>
-  <details id="contextSettingsPanel" class="panel settings-panel"><summary><span><span class="section-kicker">CONTEXT</span><strong>上下文设置</strong></span><span class="summary-action">展开设置</span></summary><div class="details-body"><p class="hint">1 层等于 1 条旧 user 或 assistant 消息；当前 user 始终额外保留，本地对话不会被裁掉。</p><div class="inline-settings"><label>旧历史消息层数<input id="historyDepth" type="number" min="0" step="1" value="20"></label><button id="saveHistoryDepth">保存并从下一轮生效</button></div><span id="historyDepthState" class="hint"></span></div></details>
 </main>
+<dialog id="voicePanel" class="manager-dialog"><div class="dialog-header"><h2>语音交流</h2><button data-close-panel="voicePanel">关闭</button></div><div class="dialog-scroll"><p class="hint">语音与当前文字会话共享角色和历史。需先配置 STT、LLM、TTS。</p><div class="hotkey-row"><label>按住说话热键<input id="keyInput" readonly></label><button id="captureKey">录制按键</button><button id="saveKey">保存</button></div><span id="keyState" class="hint"></span><button id="talk" class="talk">按住说话</button><span id="playbackTime">0:00 / 0:00</span><input id="playback" type="range" min="0" max="100" value="0" step="0.1" aria-label="播放进度"><div class="button-row"><button id="playPause">播放</button><button id="stopAudio">中断</button></div><div id="latencyInfo">尚无本轮数据</div></div></dialog>
+<dialog id="contextPanel" class="manager-dialog"><div class="dialog-header"><h2>上下文设置</h2><button data-close-panel="contextPanel">关闭</button></div><div class="dialog-scroll"><div id="contextSettingsPanel"><p class="hint">设置本轮发送的历史条数，不删除原始聊天。</p><label>旧历史消息条数<input id="historyDepth" type="number" min="0" step="1" value="20"></label><button id="saveHistoryDepth">保存</button><span id="historyDepthState" class="hint"></span></div><button id="showLlmDebug" disabled>查看本轮上下文</button></div></dialog>
+<dialog id="messageEditPanel" class="manager-dialog"><div class="dialog-header"><h2 id="messageEditTitle">编辑消息</h2><button data-close-panel="messageEditPanel">关闭</button></div><div class="dialog-scroll"><p class="hint">从这条消息创建新分支，原对话保留。编辑用户消息会重新发送；编辑 AI 回复只保存文字。</p><label>消息内容<textarea id="messageEditContent" rows="10"></textarea></label><button id="saveMessageEdit" class="primary-button">保存到新分支</button><span id="messageEditState" class="hint"></span></div></dialog>
+<dialog id="messageVoicePanel" class="manager-dialog"><div class="dialog-header"><h2>朗读这条回复</h2><button data-close-panel="messageVoicePanel">关闭</button></div><div class="dialog-scroll"><label>本次朗读音色<select id="messageVoiceProfile"></select></label><p class="hint">默认使用角色绑定音色。可在角色设定中保存默认 TTS，或在这里为本次播放选择音色。</p><button id="playMessageVoice" class="primary-button">生成并播放</button><span id="messageVoiceState" class="hint"></span></div></dialog>
+<dialog id="characterPanel" class="manager-dialog">
+  <div class="dialog-header"><h2>角色与用户</h2><button data-close-panel="characterPanel">关闭</button></div>
+  <div class="dialog-scroll">
+    <div class="button-row"><button id="newCharacter">新角色</button><button id="copyCharacter">复制当前角色</button><button id="saveCharacter" class="primary-button">保存角色</button><button id="deleteCharacter" class="danger-button">删除角色</button></div>
+    <p class="hint">每个角色拥有自己的会话。设定保存后从下一轮生效；已有会话的角色可以编辑，但不能删除。</p>
+    <label>名称<input id="characterName" maxlength="100"></label>
+    <label>核心提示词<textarea id="characterSystem" rows="4" placeholder="她是谁，以及她应如何与你相处"></textarea></label>
+    <div class="manager-primary"><label>性格<textarea id="characterPersonality"></textarea></label><label>背景<textarea id="characterBackground"></textarea></label><label>关系<textarea id="characterRelationship"></textarea></label><label>说话风格<textarea id="characterStyle"></textarea></label></div>
+    <div class="manager-primary"><label>你的称呼<input id="characterUserName"></label><label>用户 Persona<textarea id="characterPersona" placeholder="希望这个角色了解的用户身份"></textarea></label></div>
+    <div class="manager-primary"><label>绑定预设<select id="characterPreset"></select></label><label>绑定世界书<select id="characterLorebook"></select></label></div>
+    <label>绑定 LLM<select id="characterLlm"></select></label><label>默认朗读音色<select id="characterTts"></select></label><span id="characterState" class="hint"></span>
+  </div>
+</dialog>
+<dialog id="searchPanel" class="manager-dialog">
+  <div class="dialog-header"><h2>联网搜索</h2><button data-close-panel="searchPanel">关闭</button></div>
+  <div class="dialog-scroll">
+    <label class="inline-check"><input id="searchEnabled" type="checkbox">启用搜索服务</label>
+    <label>搜索 Provider<select id="searchProvider"><option value="tavily">Tavily</option><option value="volcengine">豆包搜索 Custom（API Key）</option><option value="custom">自定义 HTTP</option><option value="searxng">SearXNG（需启用 JSON API）</option></select></label>
+    <label>Endpoint<input id="searchEndpoint" placeholder="https://api.tavily.com/search"></label>
+    <label>API Key<input id="searchApiKey" type="password" autocomplete="new-password" placeholder="留空保留已有 Key"></label>
+    <div class="manager-primary"><label>最多返回来源数<input id="searchMaxResults" type="number" min="1" max="10"></label><label id="searchTavilyFields">Tavily 搜索深度<select id="searchDepth"><option value="basic">Basic</option><option value="advanced">Advanced</option></select></label></div>
+    <details id="searchAdvancedFields"><summary id="searchAdvancedTitle">高级参数</summary><div class="details-body"><div id="searchCustomFields" class="details-body">
+      <label>自定义请求方法<select id="searchMethod"><option>POST</option><option>GET</option></select></label>
+      <label>自定义请求模板（JSON，支持 {{query}} 和 {{max_results}}）<textarea id="searchTemplate" rows="4"></textarea></label>
+      <div class="manager-primary"><label>Key 请求头名称<input id="searchAuthHeader"></label><label>Key 前缀（Bearer 后保留空格）<input id="searchAuthPrefix"></label></div>
+      <label>结果数组路径<input id="searchResultsPath" placeholder="Result.WebResults"></label>
+      <div class="manager-primary"><label>标题路径<input id="searchTitlePath"></label><label>链接路径<input id="searchUrlPath"></label><label>正文路径<input id="searchContentPath"></label></div>
+      </div><label id="searchVolcengineFields">豆包额外参数（JSON，如 Filter、TimeRange、QueryControl）<textarea id="searchExtraBody" rows="4"></textarea></label>
+      <p id="searchCustomHelp" class="hint">自定义字段路径用点分隔；POST 模板发送 JSON，GET 模板发送查询参数。</p><p id="searchVolcengineHelp" class="hint">豆包 Query 与 Count 由本轮查询和来源数填写，额外参数不能覆盖它们。</p>
+    </div></details>
+    <p class="hint">AUTO 会请当前模型判断是否需要搜索；ON 每轮强制查询；OFF 不调用搜索服务。搜索失败会明确显示，来源随回复保存。</p>
+    <div class="button-row"><button id="saveSearch" class="primary-button">保存</button><button id="testSearch">测试已保存配置</button></div><span id="searchState" class="hint"></span>
+  </div>
+</dialog>
+<dialog id="heartbeatPanel" class="manager-dialog">
+  <div class="dialog-header"><h2>主动联系</h2><button data-close-panel="heartbeatPanel">关闭</button></div>
+  <div class="dialog-scroll">
+    <p id="heartbeatConversation" class="hint"></p>
+    <label class="inline-check"><input id="heartbeatEnabled" type="checkbox">启用当前会话的 Heartbeat</label>
+    <div class="manager-primary"><label>检查间隔（分钟）<input id="heartbeatInterval" type="number" min="1" max="1440"></label><label>互动后冷却（分钟）<input id="heartbeatCooldown" type="number" min="0" max="1440"></label><label>每天最多主动消息<input id="heartbeatDailyMax" type="number" min="1" max="100"></label></div>
+    <label class="inline-check"><input id="heartbeatQuiet" type="checkbox">启用静默时段</label>
+    <div class="manager-primary"><label>开始小时<input id="heartbeatQuietStart" type="number" min="0" max="23"></label><label>结束小时<input id="heartbeatQuietEnd" type="number" min="0" max="23"></label></div>
+    <p class="hint">后端在页面关闭时继续检查。模型可以保持沉默，主动消息会进入正式聊天历史。停止后端会暂停运行；手机系统弹窗通道尚未接入。</p>
+    <div class="button-row"><button id="saveHeartbeat" class="primary-button">保存设置</button><button id="checkHeartbeat">立即检查</button><button id="refreshHeartbeatLogs">刷新记录</button></div>
+    <span id="heartbeatState" class="hint"></span><div id="heartbeatLogs" class="heartbeat-log-list"></div>
+  </div>
+</dialog>
 <dialog id="promptPanel" class="manager-dialog prompt-panel">
   <div class="dialog-header"><div><span class="section-kicker">PROMPT ORCHESTRATION</span><h2>Preset Manager</h2></div><button class="dialog-close" data-close-panel="promptPanel" aria-label="关闭 Preset Manager">关闭</button></div>
   <div class="dialog-scroll"><p class="hint">Preset 是最终 Prompt 的编排控制器。切换从下一轮生效；拖动改变 Relative 顺序，In-Chat 位置由 Depth / Role / Order 决定。条目默认折叠。</p>
@@ -52,8 +102,8 @@
 <dialog id="vectorPanel" class="manager-dialog vector-panel">
   <div class="dialog-header"><div><span class="section-kicker">VECTOR MEMORY</span><h2>向量记忆管理</h2></div><button class="dialog-close" data-close-panel="vectorPanel" aria-label="关闭向量记忆管理">关闭</button></div>
   <div class="dialog-scroll">
-    <p class="hint">独立 Embedding 与 Rerank 配置，不读取 LLM Provider。支持自己的兼容端点、SiliconFlow、Ollama 等；本地端点可不填 Key。</p>
-    <label class="inline-check vector-master-switch"><input id="vectorEnabled" type="checkbox">启用每轮向量召回</label>
+    <p class="hint">记忆方案暂缓：当前 Companion 不读取或自动写入向量记忆。此处保留原知识库工具，供之后选择存储方案。独立 Embedding 与 Rerank 配置，不读取 LLM Provider。支持自己的兼容端点、SiliconFlow、Ollama 等；本地端点可不填 Key。</p>
+    <label class="inline-check vector-master-switch"><input id="vectorEnabled" type="checkbox">保存向量召回开关（当前核心暂不读取）</label>
     <div class="vector-config-grid">
       <details class="provider-group" open><summary><span><strong>向量化 / Embedding</strong><small>切片向量化与粗排召回</small></span><span>展开配置</span></summary><div class="details-body">
         <label>向量 API URL<input id="vectorApiUrl" placeholder="例如 https://api.siliconflow.cn 或本地地址"></label>
@@ -92,10 +142,12 @@
     <details class="provider-group"><summary><span><strong>TTS</strong><small>语音合成</small></span><span>展开配置</span></summary><div class="details-body"><label>Profile<select id="ttsProfile"></select></label><div class="button-row"><button id="newTtsProfile">新建</button><button id="deleteTtsProfile" class="danger-button">删除</button></div><label>名称<input id="ttsName"></label><label>类型<select id="ttsProviderType"><option value="websocket">WebSocket / 火山双向</option><option value="http">HTTP JSON</option></select></label><label>Endpoint<input id="ttsEndpoint"></label><label>Resource ID<input id="ttsResourceId"></label><label>API Key<input id="ttsApiKey" type="password" autocomplete="new-password"></label><label>Voice Type<input id="ttsVoiceType"></label><label>Emotion<input id="ttsEmotion"></label><label class="inline-check"><input id="ttsEnableEmotion" type="checkbox">启用音色情感</label><div class="manager-primary"><label>Emotion Scale（1-5）<input id="ttsEmotionScale" type="number" min="1" max="5" step="0.1"></label><label>Speed Ratio（0.1-2）<input id="ttsSpeedRatio" type="number" min="0.1" max="2" step="0.1"></label></div><label>Request Template (JSON)<textarea id="ttsRequestTemplate">{}</textarea></label><div class="button-row"><button id="saveTtsProfile" class="primary-button">保存并启用</button><button id="testTtsProfile">真实最小合成测试</button></div><span id="ttsProviderState" class="hint"></span></div></details>
   </div>
 </dialog>
-<dialog id="llmDebugDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>上下文调试</h2><button id="closeLlmDebug" aria-label="关闭">关闭</button></div><p class="hint">以下内容来自实际请求和响应。对话区显示的是规则清理后文本，不是严格的 LLM 原文。</p><h3>1. 实际发送给 LLM 的完整消息</h3><pre id="llmMessagesDebug"></pre><h3>2. LLM 原始回复（一字未改）</h3><pre id="llmRawDebug"></pre><h3>3. 规则清理后的对话文本</h3><pre id="llmNormalizedDebug"></pre><h3>4. 实际送给 TTS 的文本</h3><pre id="llmTtsDebug"></pre><h3>5. Lorebook 与向量记忆 Trace</h3><pre id="lorebookActivationDebug"></pre></dialog>
+<dialog id="llmDebugDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>上下文调试</h2><button id="closeLlmDebug" aria-label="关闭">关闭</button></div><p class="hint">以下内容来自实际请求和响应。对话正文保留原文，语音朗读文本单独清理。</p><h3>1. 实际发送给 LLM 的完整消息</h3><pre id="llmMessagesDebug"></pre><h3>2. LLM 原始回复（一字未改）</h3><pre id="llmRawDebug"></pre><h3>3. 规则清理后的对话文本</h3><pre id="llmNormalizedDebug"></pre><h3>4. 实际送给 TTS 的文本</h3><pre id="llmTtsDebug"></pre><h3>5. Lorebook 与向量记忆 Trace</h3><pre id="lorebookActivationDebug"></pre></dialog>
 <dialog id="promptImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>Preset 导入报告</h2><button id="closePromptImport" aria-label="关闭">关闭</button></div><pre id="promptImportReport"></pre><div id="promptMarkerMappings" class="marker-mappings"></div><div class="button-row"><button id="confirmPromptImport">确认导入并启用</button></div></dialog>
 <dialog id="lorebookImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>Lorebook 导入报告</h2><button id="closeLorebookImport" aria-label="关闭">关闭</button></div><pre id="lorebookImportReport"></pre><div class="button-row"><button id="confirmLorebookImport">确认导入并启用</button></div></dialog>
 <dialog id="vectorImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>向量预切片导入报告</h2><button id="closeVectorImport" aria-label="关闭">关闭</button></div><pre id="vectorImportReport"></pre><div class="button-row"><button id="confirmVectorImport">确认导入（暂不调用模型）</button></div></dialog>
 <dialog id="vectorChunksDialog" class="manager-dialog vector-chunks-dialog"><div class="dialog-header"><div><span class="section-kicker">VECTOR CHUNKS</span><h2 id="vectorChunksTitle">查看向量切片</h2></div><button id="closeVectorChunks" class="dialog-close" aria-label="关闭切片检查器">关闭</button></div><div class="dialog-scroll"><div class="vector-chunk-toolbar"><label>搜索 ID、正文或元数据<input id="vectorChunkSearch" placeholder="输入关键词后回车"></label><button id="searchVectorChunks">搜索</button><button id="clearVectorChunkSearch">清除</button></div><span id="vectorChunksSummary" class="hint"></span><div id="vectorChunksList" class="vector-chunks-list"></div><div class="vector-chunk-pagination"><button id="previousVectorChunks">上一页</button><span id="vectorChunksPage" class="hint"></span><button id="nextVectorChunks">下一页</button></div></div></dialog>
-<script src="/static/app.js?v=20260901-vector-v3"></script>
+<script src="/static/app.js?v=20261001-companion"></script>
+<script src="/static/companion.js?v=20261001-chat"></script>
+<script src="/static/chat-ui.js?v=20261001-chat"></script>
 </body></html>

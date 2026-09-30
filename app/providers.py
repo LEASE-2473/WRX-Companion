@@ -13,6 +13,8 @@ from websockets.exceptions import ConnectionClosed
 
 from .models import ChatMessage, LlmProviderProfile, SttProviderProfile, TtsProviderProfile
 from .provider_store import ProviderSnapshot
+from .usage import read_usage, merge_usage
+from .models import TokenUsage
 
 class ProviderError(RuntimeError):
     pass
@@ -344,6 +346,7 @@ class OpenAICompatibleLlm(LlmProvider):
     def __init__(self, profile: LlmProviderProfile) -> None:
         self.profile = profile.model_copy(deep=True)
         self.last_prompt_tokens = None
+        self.last_usage = TokenUsage()
         self.generation_parameters: dict[str, object] = {}
         self.generation_parameter_report: dict[str, object] = {"applied": {}, "ignored": {}}
 
@@ -398,51 +401,35 @@ class OpenAICompatibleLlm(LlmProvider):
             _LLM_HTTP_CLIENT = httpx.AsyncClient(timeout=90, limits=httpx.Limits(max_keepalive_connections=4, max_connections=8, keepalive_expiry=60))
         return _LLM_HTTP_CLIENT
 
+    def record_usage(self, body):
+        self.last_usage = merge_usage(self.last_usage, read_usage(body))
+        self.last_prompt_tokens = self.last_usage.input_tokens
+
     async def complete(self, messages: list[ChatMessage]) -> str:
         text, _ = await self.complete_with_metrics(messages)
         return text
 
     async def complete_with_metrics(self, messages: list[ChatMessage]) -> tuple[str, float | None]:
-        import time
-        profile = self.profile
-        if not profile.api_key or not profile.model:
-            raise ProviderError("缺少 LLM API Key 或 Model")
-        payload = {"model": profile.model, "messages": [m.model_dump() for m in messages], **self.generation_parameters, "stream": True}
-        client = self.client()
+        from time import perf_counter
+        pieces = []
         first_token_at = None
-        pieces: list[str] = []
-        self.last_prompt_tokens = None
-        async with client.stream("POST", f"{profile.base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {profile.api_key}"}, json=payload) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    body = json.loads(data)
-                    usage = _input_token_usage(body)
-                    if usage is not None:
-                        self.last_prompt_tokens = usage
-                    delta = body.get("choices", [{}])[0].get("delta", {}).get("content") or ""
-                except (ValueError, IndexError, KeyError):
-                    continue
-                if delta and first_token_at is None:
-                    first_token_at = time.perf_counter()
-                pieces.append(delta)
+        async for piece in self.stream_complete(messages):
+            if first_token_at is None:
+                first_token_at = perf_counter()
+            pieces.append(piece)
         return "".join(pieces), first_token_at
 
     async def stream_complete(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
         profile = self.profile
         if not profile.api_key or not profile.model:
             raise ProviderError("缺少 LLM API Key 或 Model")
-        payload = {"model": profile.model, "messages": [m.model_dump() for m in messages], **self.generation_parameters, "stream": True}
+        payload = {"model": profile.model, "messages": [m.api_message() for m in messages], **self.generation_parameters, "stream": True, "stream_options": {"include_usage": True}}
         self.last_prompt_tokens = None
+        self.last_usage = TokenUsage()
         emitted = False
         endpoint = f"{profile.base_url.rstrip('/')}/chat/completions"
         headers = {"Authorization": f"Bearer {profile.api_key}"}
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 async with self.client().stream("POST", endpoint, headers=headers, json=payload) as response:
                     response.raise_for_status()
@@ -460,9 +447,7 @@ class OpenAICompatibleLlm(LlmProvider):
                         if error:
                             detail = error.get("message") if isinstance(error, dict) else str(error)
                             raise ProviderError(f"LLM 返回错误：{detail or '未知错误'}")
-                        usage = _input_token_usage(body)
-                        if usage is not None:
-                            self.last_prompt_tokens = usage
+                        self.record_usage(body)
                         try:
                             choice = body.get("choices", [{}])[0]
                             delta = choice.get("delta", {}).get("content") or choice.get("message", {}).get("content") or ""
@@ -476,12 +461,16 @@ class OpenAICompatibleLlm(LlmProvider):
                 break
             except httpx.TransportError:
                 # 只在还没有输出正文时重试，避免已经交给 TTS 的半段回复被重复发送。
-                if emitted or attempt >= 1:
+                if emitted or attempt >= 2:
                     raise
                 await asyncio.sleep(0.3)
             except httpx.HTTPStatusError as exc:
+                unsupported_usage = exc.response.status_code in {400, 422} and "stream_options" in exc.response.text
+                if not emitted and unsupported_usage and "stream_options" in payload and attempt < 2:
+                    payload.pop("stream_options")
+                    continue
                 retryable = exc.response.status_code in {408, 429, 500, 502, 503, 504}
-                if emitted or attempt >= 1 or not retryable:
+                if emitted or attempt >= 2 or not retryable:
                     raise
                 await asyncio.sleep(0.3)
         if emitted:
@@ -489,13 +478,13 @@ class OpenAICompatibleLlm(LlmProvider):
 
         # 部分 OpenAI-compatible 聚合服务会偶发以 200 + [DONE] 结束，却不返回正文。
         # 使用同一模型、同一 messages 做一次非流式兜底，不改变模型或回复参数。
-        fallback_payload = {**payload, "stream": False}
+        fallback_payload = {key: value for key, value in payload.items() if key != "stream_options"}
+        fallback_payload["stream"] = False
         response = await self.client().post(endpoint, headers=headers, json=fallback_payload)
         response.raise_for_status()
         body = response.json()
-        usage = _input_token_usage(body)
-        if usage is not None:
-            self.last_prompt_tokens = usage
+        self.last_usage = TokenUsage()
+        self.record_usage(body)
         error = body.get("error") if isinstance(body, dict) else None
         if error:
             detail = error.get("message") if isinstance(error, dict) else str(error)

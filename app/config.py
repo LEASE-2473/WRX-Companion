@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0-alpha"
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 PRESETS_FILE = DATA_DIR / "presets.json"

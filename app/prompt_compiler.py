@@ -72,13 +72,13 @@ def estimate_prompt_tokens(messages: list[ChatMessage]) -> int:
     )
 
 
-def _expand_prompt_macros(text: str) -> tuple[str, dict[str, int]]:
+def _expand_prompt_macros(text: str, values=None) -> tuple[str, dict[str, int]]:
     expansions: dict[str, int] = {}
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1).lower()
         expansions[name] = expansions.get(name, 0) + 1
-        return _PROMPT_MACRO_VALUES[name]
+        return (values or _PROMPT_MACRO_VALUES)[name]
 
     return _PROMPT_MACRO.sub(replace, text), expansions
 
@@ -148,18 +148,25 @@ def compile_prompt(
     history: list[ChatMessage],
     current_user_message: str,
     vector_memories: list[dict[str, Any]] | None = None,
+    character_name: str = "当前角色",
+    user_name: str = "用户",
+    marker_contents: dict[str, str] | None = None,
+    current_user_suffix: str = "",
+    current_images: list[str] | None = None,
 ) -> PromptCompileResult:
     """编译最终 OpenAI-compatible messages，并返回同源 Trace。"""
     if history_depth < 0:
         raise ValueError("history_depth must be non-negative")
 
     clean_history = [
-        ChatMessage(role=message.role, content=message.content)
+        ChatMessage(role=message.role, content=message.content, images=message.images)
         for message in history
         if message.role in {"user", "assistant"}
     ]
     selected_history = clean_history[-history_depth:] if history_depth else []
-    chat_messages = selected_history + [ChatMessage(role="user", content=current_user_message)]
+    # 本轮元数据只附加到当前输入，不参与世界书关键词激活。
+    current_content = current_user_message + ("\n\n" + current_user_suffix if current_user_suffix else "")
+    chat_messages = selected_history + [ChatMessage(role="user", content=current_content, images=current_images or [])]
     scan_messages = clean_history + [ChatMessage(role="user", content=current_user_message)]
 
     activation_trace: list[dict[str, Any]] = []
@@ -179,7 +186,7 @@ def compile_prompt(
         })
         if not active:
             continue
-        content, expansions = _expand_prompt_macros(entry.content.strip())
+        content, expansions = _expand_prompt_macros(entry.content.strip(), {"char": character_name, "user": user_name})
         if expansions:
             macro_expansions[f"lorebook:{entry.id}"] = expansions
         compiled_entry = entry.model_copy(update={"content": content})
@@ -230,11 +237,12 @@ def compile_prompt(
                 relative_parts.append((prompt.identifier, chat_messages))
             else:
                 entries = sorted(marker_entries[prompt.identifier], key=lambda pair: (pair[1].order, pair[0]))
-                relative_parts.append((prompt.identifier, [ChatMessage(role=entry.role, content=entry.content.strip()) for _, entry in entries]))
+                native = (marker_contents or {}).get(prompt.identifier, "")
+                relative_parts.append((prompt.identifier, ([ChatMessage(role="system", content=native)] if native else []) + [ChatMessage(role=entry.role, content=entry.content.strip()) for _, entry in entries]))
             continue
         if prompt.injection_position == "in_chat":
             if prompt.content.strip():
-                content, expansions = _expand_prompt_macros(prompt.content.strip())
+                content, expansions = _expand_prompt_macros(prompt.content.strip(), {"char": character_name, "user": user_name})
                 if expansions:
                     macro_expansions[prompt.identifier] = expansions
                 injections.append(_Injection("preset", prompt.identifier, prompt.role, content, prompt.injection_depth, prompt.injection_order, sequence))
@@ -243,7 +251,7 @@ def compile_prompt(
                 disabled.append({"identifier": prompt.identifier, "reason": "empty_content"})
             continue
         if prompt.content.strip():
-            content, expansions = _expand_prompt_macros(prompt.content.strip())
+            content, expansions = _expand_prompt_macros(prompt.content.strip(), {"char": character_name, "user": user_name})
             if expansions:
                 macro_expansions[prompt.identifier] = expansions
             relative_parts.append((prompt.identifier, [ChatMessage(role=prompt.role, content=content)]))
@@ -253,6 +261,7 @@ def compile_prompt(
     marker_trace: dict[str, Any] = {}
     for marker in MARKERS:
         marker_trace[marker] = {
+            "native_content_included": marker in expanded_markers and bool((marker_contents or {}).get(marker)),
             "enabled": marker in expanded_markers,
             "expanded_entry_ids": [entry.id for _, entry in sorted(marker_entries[marker], key=lambda pair: (pair[1].order, pair[0]))],
         }

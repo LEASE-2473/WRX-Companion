@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title WRX Voice Agent V1.0.0
+title WRX Companion V2.0
 
 set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 set "BUNDLED_PYTHON=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
@@ -25,14 +25,14 @@ if not exist "%PYTHON_EXE%" (
 
 if not exist "%PYTHON_EXE%" goto :error
 
-if not exist "%~dp0.venv\.voice_agent_deps_installed" (
+if not exist "%~dp0.venv\.companion_deps_installed" (
     echo [2/3] Installing dependencies...
     "%PYTHON_EXE%" -m pip install -r requirements.txt
     if errorlevel 1 goto :error
-    type nul > "%~dp0.venv\.voice_agent_deps_installed"
+    type nul > "%~dp0.venv\.companion_deps_installed"
 )
 
-echo [3/3] Starting Voice Agent...
+echo [3/3] Starting Companion...
 echo Open http://127.0.0.1:2473 in your browser.
 echo Press Ctrl+C to stop the server.
 echo.
