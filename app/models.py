@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import base64
 import binascii
 
@@ -78,7 +78,7 @@ class MessageSpeech(BaseModel):
 
 class HeartbeatSettings(BaseModel):
     enabled: bool = False
-    interval_minutes: int = Field(default=30, ge=1, le=1440)
+    interval_minutes: int = Field(default=5, ge=1, le=1440)
     cooldown_minutes: int = Field(default=30, ge=0, le=1440)
     max_messages_per_day: int = Field(default=6, ge=1, le=100)
     quiet_enabled: bool = False
@@ -220,6 +220,16 @@ class LorebookActiveUpdate(BaseModel):
 class RuntimeSettings(BaseModel):
     schema_version: int = 1
     history_depth: int = Field(default=20, ge=0)
+    history_mode: Literal['count', 'since'] = 'count'
+    history_since: str | None = None
+
+    @model_validator(mode='after')
+    def validate_history_since(self):
+        if self.history_mode == 'since':
+            from datetime import datetime
+            if not self.history_since or datetime.fromisoformat(self.history_since).tzinfo is None:
+                raise ValueError('时间筛选需要包含时区的开始日期时间')
+        return self
 
 class VectorMemoryConfig(BaseModel):
     enabled: bool = False
@@ -271,6 +281,7 @@ class LlmProviderProfile(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = ""
+    purpose: Literal['chat','embedding','rerank'] = 'chat'
 
 class TtsProviderProfile(BaseModel):
     id: str

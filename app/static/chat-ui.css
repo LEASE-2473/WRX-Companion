@@ -33,3 +33,50 @@ main.chat-app{max-width:none;margin:0;padding:0;display:grid;grid-template-colum
 
 /* 图片附件与待发送预览。 */
 .image-drafts,.message-images{display:flex;flex-wrap:wrap;gap:8px}.image-drafts:not(:empty){padding:8px 0}.image-item{position:relative}.image-item img{display:block;max-width:240px;max-height:220px;border-radius:8px;object-fit:contain}.image-drafts img{width:80px;height:70px;object-fit:cover}.image-item button{position:absolute;right:0;top:0;padding:2px 6px;background:white}.message-images{margin-top:8px}
+
+/* iOS 聚焦小字号表单会自动放大；保留用户手动缩放能力。 */
+@media(max-width:760px),(hover:none) and (pointer:coarse){
+  input,textarea,select:not(#searchMode),.composer textarea,.sidebar-label select{font-size:16px}
+}
+@media(max-width:600px){
+  .chat-topbar>div{min-width:0;overflow-wrap:anywhere}
+  #chat .message{min-width:0}
+  .image-item{max-width:100%}.image-item img{max-width:100%}
+  .manager-dialog{height:100dvh;max-height:100dvh;max-width:100vw;margin:0}
+  .dialog-scroll>*{min-width:0}.dialog-scroll input,.dialog-scroll textarea,.dialog-scroll select{min-width:0;max-width:100%}
+  .prompt-toolbar label{min-width:0;width:100%}
+  .composer-wrap{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+}
+
+.companion-state-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 16px; font-size:12px; color:var(--muted, #8a8190); }
+.companion-state-bar label { display:flex; align-items:center; gap:6px; }
+.companion-state-bar progress { width:70px; height:6px; accent-color:#be8baf; }
+#companionMood { border-radius:12px; padding:3px 8px; background:#be8baf18; }
+.heartbeat-log { margin:8px 0; padding:10px; border:1px solid #be8baf40; border-radius:8px; min-width:0; }
+.heartbeat-log summary { cursor:pointer; overflow-wrap:anywhere; }
+.heartbeat-log pre { max-height:360px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+
+.companion-state-bar[hidden] { display:none; }
+.emotion-change-label { font-weight:600; color:var(--text); }
+#companionStateText { overflow-wrap:anywhere; }
+
+/* 用户消息与 AI 消息共用框外元信息和底部操作，正文气泡内编辑。 */
+#chat .message.user{background:transparent;border:0;padding:0;border-radius:0}
+.message.user>.message-body{background:#eaf0e3;border:1px solid #e0e7d8;border-radius:12px;padding:13px 18px}
+.message.user>.message-meta{padding-inline:6px}
+.message.user .message-menu-options{left:auto;right:0}
+.message-actions[hidden]{display:none}
+.message-inline-editor{display:block;box-sizing:border-box;width:100%;min-width:240px;min-height:90px;max-height:55vh;resize:vertical;border:0;background:transparent;box-shadow:none;padding:0;font:inherit;line-height:1.85;color:inherit}
+.message-edit-controls{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:7px}
+.message-edit-controls button{font-size:11px;padding:5px 9px}
+@media(max-width:600px){.message.user>.message-body{padding:11px 14px}.message-inline-editor{min-width:0;font-size:16px}}
+
+/* 收紧单条消息内部间距，保留相邻消息原有 gap。 */
+#chat .message-meta{line-height:1.4;margin-bottom:3px}
+#chat .message-actions{margin-top:2px;line-height:1.4}
+#chat .message-actions>button,#chat .message-menu>summary{padding-block:2px}
+#chat .message-edit-controls{margin-top:2px}
+
+/* 操作按钮独立行盒，避免全局按钮悬浮位移造成文字越界观感。 */
+#chat .message-actions>button,#chat .message-menu>summary{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:20px;line-height:16px;font-weight:400;padding-block:2px;transform:none;box-shadow:none}
+#chat .message-actions>button:hover:not(:disabled),#chat .message-menu>summary:hover{transform:none;box-shadow:none}

@@ -1,15 +1,22 @@
 """后端生命周期内运行；调度领取与下一次时间存储在 SQLite。"""
 import asyncio
 import logging
+from datetime import datetime
 from . import companion_store as store
 from .companion_core import core
 
 
 async def tick():
     store.recover_interrupted()
+    from . import role_state
+    await role_state.tick_summaries()
     for cid in store.due_heartbeats():
         try:
-            core.heartbeat(cid)
+            cfg = role_state.config()
+            last = store.heartbeat_logs(cid, 1)
+            recent = last and (store.utcnow() - datetime.fromisoformat(last[0]['started_at'])).total_seconds() < cfg.no_action_minutes * 60
+            if not recent:
+                core.heartbeat(cid)
         except (ValueError, KeyError):
             logging.warning("Heartbeat 未能启动：会话 %s，请检查角色与 LLM 配置", cid)
 

@@ -27,6 +27,7 @@ async function check(action, suffix) {
 }
 (async () => {
   await check('fetchModels()', 'models');
+  await check('testLlmConnection()', 'connection');
   await check("testProvider('llm')", 'test');
   console.log('Provider UI draft persistence checks passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

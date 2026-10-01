@@ -3,6 +3,7 @@ import asyncio
 import httpx
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse, Response
 
 from . import companion_store as store
@@ -16,6 +17,43 @@ from .providers import HttpTts, ProviderError
 from .pipeline import normalize_voice_reply
 
 router = APIRouter()
+
+class ContextPreviewInput(BaseModel):
+    content: str = ''
+
+@router.post('/api/conversations/{cid}/context-preview')
+def context_preview(cid: str, value: ContextPreviewInput):
+    try:
+        conversation = store.get_conversation(cid)
+        character = store.get_character(conversation.character_id)
+        compiled, _ = core.context(conversation, character, value.content, 'web')
+        return {'llm_messages': [m.model_dump() for m in compiled.messages], 'prompt_trace': compiled.trace,
+                'preview_note': '使用已保存配置、现有历史和当前时间；未发送模型请求，未保存输入。冷召回及联网结果在真实执行时产生，此处不调用外部 API。'}
+    except (KeyError, ValueError) as exc:
+        raise api_error(exc)
+
+@router.get('/api/conversations/{cid}/context-last')
+def context_last(cid: str):
+    try:
+        store.get_conversation(cid)
+        with store.database() as db:
+            row = db.execute("SELECT id FROM requests WHERE conversation_id=? AND result IS NOT NULL ORDER BY started_at DESC LIMIT 1", (cid,)).fetchone()
+        if not row:
+            return {'debug': None}
+        request = store.get_request(row['id'])
+        return {'request_id': row['id'], 'status': request['status'], 'usage': request['usage'],
+                'debug': (request['result'] or {}).get('debug')}
+    except (KeyError, ValueError) as exc:
+        raise api_error(exc)
+
+
+@router.get('/api/conversations/{cid}/state')
+def companion_state(cid: str):
+    try:
+        from . import role_state
+        return role_state.state(cid)
+    except (KeyError, ValueError) as exc:
+        raise api_error(exc)
 
 
 def api_error(exc):
@@ -31,6 +69,14 @@ def stream_job(job):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@router.post('/api/conversations/{cid}/requests/{rid}/cancel')
+async def cancel_request(cid: str, rid: str):
+    try:
+        return await core.cancel(cid, rid)
+    except (KeyError, ValueError) as exc:
+        raise api_error(exc)
+
+
 @router.get("/api/characters")
 def characters():
     return store.list_characters()
@@ -42,7 +88,8 @@ def validate_character(value):
     if value.lorebook_id:
         get_lorebook(value.lorebook_id)
     if value.llm_profile_id:
-        get_profile("llm", value.llm_profile_id)
+        if get_profile("llm", value.llm_profile_id).purpose != "chat":
+            raise ValueError("角色必须绑定对话用途 Profile")
     if value.tts_profile_id:
         get_profile("tts", value.tts_profile_id)
 
@@ -115,6 +162,18 @@ def request_status(cid: str, rid: str):
         if request["conversation_id"] != cid:
             raise KeyError("请求不存在")
         return request
+    except (ValueError, KeyError) as exc:
+        raise api_error(exc) from exc
+
+
+class MessageEditInput(BaseModel):
+    content: str
+
+
+@router.patch("/api/conversations/{cid}/messages/{mid}")
+def edit_message(cid: str, mid: str, value: MessageEditInput):
+    try:
+        return store.edit_user_message(cid, mid, value.content)
     except (ValueError, KeyError) as exc:
         raise api_error(exc) from exc
 
@@ -214,6 +273,15 @@ def remove_conversation(cid: str):
         store.delete_conversation(cid)
         return {"ok": True}
     except (ValueError, KeyError) as exc:
+        raise api_error(exc) from exc
+
+
+@router.post('/api/conversations/{cid}/messages/{mid}/resend')
+async def resend_message(cid: str, mid: str, value: TextTurn):
+    try:
+        job = core.submit(cid, value.request_id, value.content, value.timezone, 'web', value.search_mode, resend_mid=mid)
+        return stream_job(job)
+    except (KeyError, ValueError) as exc:
         raise api_error(exc) from exc
 
 

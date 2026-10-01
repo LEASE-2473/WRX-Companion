@@ -53,8 +53,7 @@ function setKeyState(message, kind = '') { $('keyState').textContent = message; 
 function setPromptState(message, kind = '') { $('promptState').textContent = message; $('promptState').className = `hint ${kind}`.trim(); }
 function setHistoryDepthState(message, kind = '') { $('historyDepthState').textContent = message; $('historyDepthState').className = `hint ${kind}`.trim(); }
 function renderDebug(out) { const promptHash = out.debug?.prompt_sha256 || ''; if (promptHash) setPromptState(promptDirty ? `本轮使用已保存 Preset（指纹 ${promptHash}）；页面仍有未保存修改` : `本轮已注入当前 Preset（指纹 ${promptHash}）`, promptDirty ? 'dirty' : 'saved'); const values = [['STT', out.latency?.stt], ['向量召回', out.latency?.vector_retrieval], ['LLM 首 Token', out.latency?.llm_first_token], ['首个可朗读片段', out.latency?.llm_first_tts_segment], ['TTS 首音', out.latency?.tts_first_audio], ['松键到服务端首音', out.latency?.response_to_first_audio], ['松键到实际首播', out.latency?.actual_first_playback], ['后台总耗时', out.latency?.total]]; const timings = values.filter(([, value]) => Number.isFinite(value)).map(([label, value]) => `<div class="latency-item"><span>${label}</span><strong>${value.toFixed(3)}s</strong></div>`).join(''); const metric = out.prompt_tokens; const token = Number.isFinite(metric?.value) ? `<div class="latency-item"><span>最终 Prompt Token</span><strong>${Math.trunc(metric.value)}${metric.source === 'provider' ? '（实际）' : '（估算）'}</strong></div>` : ''; $('latencyInfo').innerHTML = timings + token || '尚无数据'; }
-function saveLlmDebug(debug) { lastLlmDebug = debug || null; lastLorebookTrace = debug?.prompt_trace ? { lorebook: debug.prompt_trace.lorebook, entries: debug.prompt_trace.lorebook_activation || [], vector_memory: debug.prompt_trace.vector_memory || {} } : null; $('showLlmDebug').disabled = !lastLlmDebug; if (settings?.lorebooks) renderLorebookEntries(); }
-function showLlmDebug() { if (!lastLlmDebug) return; $('llmMessagesDebug').textContent = JSON.stringify(lastLlmDebug.llm_messages || [], null, 2); $('llmRawDebug').textContent = lastLlmDebug.llm_raw ?? ''; $('llmNormalizedDebug').textContent = lastLlmDebug.normalized_reply ?? ''; $('llmTtsDebug').textContent = lastLlmDebug.tts_input ?? ''; $('lorebookActivationDebug').textContent = JSON.stringify(lastLorebookTrace || {}, null, 2); $('llmDebugDialog').showModal(); }
+function saveLlmDebug(debug) { lastLlmDebug = debug || null; lastLorebookTrace = debug?.prompt_trace ? { lorebook: debug.prompt_trace.lorebook, entries: debug.prompt_trace.lorebook_activation || [], vector_memory: debug.prompt_trace.vector_memory || {} } : null; $('showLlmDebug').disabled = false; if (settings?.lorebooks) renderLorebookEntries(); }
 
 async function load() {
   settings = await fetch('/api/settings').then(r => r.json());
@@ -64,7 +63,10 @@ async function load() {
   renderLorebooks(settings.lorebooks.active_lorebook_id);
   renderVectorMemory();
   $('historyDepth').value = settings.runtime_settings.history_depth;
-  setHistoryDepthState(`当前全局设置：最近 ${settings.runtime_settings.history_depth} 条旧消息；下一轮冻结`, 'saved');
+  $('historyMode').value = settings.runtime_settings.history_mode || 'count';
+  $('historySince').value = historyLocalInput(settings.runtime_settings.history_since);
+  toggleHistorySelection();
+  setHistoryDepthState(historySelectionDescription(settings.runtime_settings), 'saved');
   $('providerInfo').textContent = Object.entries(settings.provider_info).map(([key, value]) => `${key}: ${value || '未配置'}`).join(' · ');
   $('keyInput').value = formatHotkey(key);
   setKeyState(`当前生效：${formatHotkey(key)}（无需重启）`, 'saved');
@@ -98,16 +100,42 @@ function setTextInputControlsDisabled(disabled) {
 }
 function setConfigurationControlsDisabled(disabled) { $('contextSettingsPanel').inert = disabled; $('promptPanel').inert = disabled; $('lorebookPanel').inert = disabled; $('vectorPanel').inert = disabled; $('providerPanel').inert = disabled; }
 
+function historyLocalInput(value) {
+  if (!value) return '';
+  const zone = typeof currentConversation === 'function' ? currentConversation()?.timezone : undefined;
+  const parts = new Intl.DateTimeFormat('sv-SE', {timeZone:zone || 'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value));
+  return parts.replace(' ', 'T');
+}
+function historySelectionDescription(value) {
+  return value.history_mode === 'since' ? `当前全局设置：从 ${historyLocalInput(value.history_since).replace('T',' ')} 开始；下一轮生效` : `当前全局设置：最近 ${value.history_depth} 条旧消息；下一轮冻结`;
+}
+function toggleHistorySelection() {
+  const since = $('historyMode').value === 'since';
+  $('historySinceField').hidden = !since; $('historyCountField').hidden = since;
+  $('historySinceField').style.display = since ? 'grid' : 'none';
+  $('historyCountField').style.display = since ? 'none' : 'grid';
+}
+let historyPreviewRevision = 0;
+async function previewHistoryRange() {
+  const revision = ++historyPreviewRevision;
+  const depth = Number($('historyDepth').value);
+  const mode = $('historyMode').value;
+  if (mode === 'since' && !$('historySince').value) throw new Error('请选择开始日期和时间');
+  if (!Number.isInteger(depth) || depth < 0) throw new Error('历史消息条数必须是非负整数');
+  const response = await fetch('/api/role-memory/history-preview', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:activeConversationId,history_mode:mode,history_since:mode === 'since' ? $('historySince').value : null,history_depth:depth})});
+  const value = await response.json();
+  if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : '范围预览失败');
+  if (revision === historyPreviewRevision) $('historyRangePreview').textContent = `选中 ${value.count} 条旧消息 · 估算 ${value.estimated_tokens.toLocaleString()} Token · 时区 ${value.timezone}（不含本轮输入和图片Token）`;
+  return {history_mode:mode,history_since:value.history_since,history_depth:depth};
+}
 async function saveHistoryDepth() {
-  const raw = Number($('historyDepth').value);
-  if (!Number.isFinite(raw) || raw < 0 || !Number.isInteger(raw)) throw new Error('历史消息层数必须是大于等于 0 的整数');
+  const selection = await previewHistoryRange();
   setHistoryDepthState('正在保存…');
-  const response = await fetch('/api/runtime-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ history_depth: raw }) });
+  const response = await fetch('/api/runtime-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection) });
   const payload = await response.json();
-  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : '历史层数保存失败');
+  if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : '历史范围保存失败');
   settings.runtime_settings = payload;
-  $('historyDepth').value = payload.history_depth;
-  setHistoryDepthState(`已保存：最近 ${payload.history_depth} 条旧消息；从下一轮生效`, 'saved');
+  setHistoryDepthState(historySelectionDescription(payload), 'saved');
 }
 async function loadConversations() {
   conversations = await fetch('/api/conversations').then(response => response.json());
@@ -188,6 +216,7 @@ function renderPromptEntries() {
   const container = $('promptEntries'); container.innerHTML = '';
   if (!preset) { $('promptTokenTotal').textContent = '静态估算 ≈ 0 tokens'; return; }
   $('promptPresetName').value = preset.name;
+  $('promptTemperature').value = preset.generation_parameters?.temperature ?? '';
   let total = 0;
   promptOrder(preset).forEach(entry => {
     const order = preset.prompt_order.find(item => item.identifier === entry.identifier) || { identifier: entry.identifier, enabled: entry.enabled, raw_fields: {} };
@@ -213,9 +242,9 @@ function renderPromptEntries() {
       if (entry.injection_position === 'in_chat') {
         const depth = document.createElement('input'); depth.type = 'number'; depth.min = '0'; depth.value = entry.injection_depth; depth.oninput = () => { entry.injection_depth = Math.max(0, Number(depth.value) || 0); dirtyPrompt(); };
         const injectionOrder = document.createElement('input'); injectionOrder.type = 'number'; injectionOrder.value = entry.injection_order; injectionOrder.oninput = () => { entry.injection_order = Number(injectionOrder.value) || 0; dirtyPrompt(); };
-        grid.append(promptField('Depth（0=最后消息之后）', depth), promptField('Order（同 Depth/Role）', injectionOrder));
+        grid.append(promptField('Depth（1=本轮 user 前；0 也会移至 user 前）', depth), promptField('Order（同 Depth/Role）', injectionOrder));
       }
-      const content = document.createElement('textarea'); content.value = entry.content; content.oninput = () => { entry.content = content.value; dirtyPrompt(); const value = estimatePromptTokens(content.value); token.textContent = `≈ ${value} tokens`; renderPromptTokenTotal(); };
+      const content = document.createElement('textarea'); content.placeholder = '支持 {{char}}、{{user}}、{{char_status}}（当前情绪）、{{char_status_rules}}（情绪规则）、{{current_time}}（本轮时间）'; content.value = entry.content; content.oninput = () => { entry.content = content.value; dirtyPrompt(); const value = estimatePromptTokens(content.value); token.textContent = `≈ ${value} tokens`; renderPromptTokenTotal(); };
       card.append(grid, promptField('Content', content));
     } else {
       const note = document.createElement('p'); note.className = 'hint'; note.textContent = entry.identifier === 'chatHistory' ? '运行时展开选中的历史消息与当前用户消息；关闭后不会暗中回填。' : '运行时展开对应世界书出口；4.3 接入世界书编辑器。';
@@ -234,7 +263,15 @@ function renderPromptPresets(selectedId = null) {
 }
 async function promptApi(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail || 'Preset 操作失败')); return payload; }
 async function activatePromptPreset(presetId) { settings.prompt_presets = await promptApi('/api/prompt-presets/active/select', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preset_id: presetId }) }); renderPromptPresets(presetId); setPromptState('已切换服务端全局 Preset，将从下一轮开始生效', 'saved'); }
-async function saveCurrentPromptPreset() { const preset = selectedPromptPreset(); if (!preset) return; preset.name = $('promptPresetName').value.trim() || preset.name; setPromptState('正在保存…'); settings.prompt_presets = await promptApi(`/api/prompt-presets/${encodeURIComponent(preset.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset) }); await activatePromptPreset(preset.id); setPromptState('已保存并启用，将从下一轮开始生效', 'saved'); }
+async function saveCurrentPromptPreset() { const preset = selectedPromptPreset(); if (!preset) return; if (!$('promptTemperature').reportValidity()) { setPromptState('温度必须是 0–2 的数字，或留空使用模型默认值', 'dirty'); return; } updatePromptTemperature(); preset.name = $('promptPresetName').value.trim() || preset.name; setPromptState('正在保存…'); settings.prompt_presets = await promptApi(`/api/prompt-presets/${encodeURIComponent(preset.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset) }); await activatePromptPreset(preset.id); setPromptState('已保存并启用，将从下一轮开始生效', 'saved'); }
+function updatePromptTemperature() {
+  const preset = selectedPromptPreset();
+  const control = $('promptTemperature');
+  if (!preset || !control.validity.valid) return;
+  preset.generation_parameters ||= {};
+  if (control.value === '') delete preset.generation_parameters.temperature;
+  else preset.generation_parameters.temperature = control.valueAsNumber;
+}
 async function newPromptPreset() { settings.prompt_presets = await promptApi('/api/prompt-presets/new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '新 Preset' }) }); renderPromptPresets(settings.prompt_presets.active_preset_id); setPromptState('已新建并启用；可编辑后保存', 'saved'); }
 async function copyCurrentPromptPreset() { const preset = selectedPromptPreset(); if (!preset) return; settings.prompt_presets = await promptApi(`/api/prompt-presets/${encodeURIComponent(preset.id)}/copy`, { method: 'POST' }); renderPromptPresets(settings.prompt_presets.active_preset_id); setPromptState('已复制并启用副本', 'saved'); }
 async function deleteCurrentPromptPreset() { const preset = selectedPromptPreset(); if (!preset || !confirm(`删除 Preset「${preset.name}」？`)) return; settings.prompt_presets = await promptApi(`/api/prompt-presets/${encodeURIComponent(preset.id)}`, { method: 'DELETE' }); renderPromptPresets(settings.prompt_presets.active_preset_id); setPromptState('已删除；服务端当前 Preset 已更新', 'saved'); }
@@ -294,9 +331,9 @@ function renderLorebookEntries() {
     const order = document.createElement('input'); order.type = 'number'; order.value = entry.order; order.oninput = () => { entry.order = Number(order.value) || 0; dirtyLorebook(); };
     const outlet = promptSelect([['', '按分类/Position 使用默认出口'], ['worldInfoBefore', 'worldInfoBefore'], ['charDefinitions', 'charDefinitions'], ['worldInfoAfter', 'worldInfoAfter'], ['userDefinitions', 'userDefinitions']], entry.outlet || ''); outlet.disabled = entry.position === 'at_depth'; outlet.onchange = () => { entry.outlet = outlet.value || null; dirtyLorebook(); renderLorebookEntries(); };
     const grid = document.createElement('div'); grid.className = 'prompt-entry-grid'; grid.append(promptField('标题', title), promptField('稳定 ID', id), promptField('分类', category), constantLabel, promptField('扫描层数', scanDepth), promptField('Position', position), promptField('Role', role), promptField('Order', order), promptField('高级出口覆盖', outlet));
-    if (entry.position === 'at_depth') { const depth = document.createElement('input'); depth.type = 'number'; depth.min = '0'; depth.value = entry.depth; depth.oninput = () => { entry.depth = Math.max(0, Number(depth.value) || 0); dirtyLorebook(); }; grid.append(promptField('Depth（0=最后消息之后）', depth)); }
+    if (entry.position === 'at_depth') { const depth = document.createElement('input'); depth.type = 'number'; depth.min = '0'; depth.value = entry.depth; depth.oninput = () => { entry.depth = Math.max(0, Number(depth.value) || 0); dirtyLorebook(); }; grid.append(promptField('Depth（1=本轮 user 前；0 也会移至 user 前）', depth)); }
     const finalOutlet = document.createElement('strong'); finalOutlet.className = 'final-outlet'; finalOutlet.textContent = `最终出口：${finalLoreOutlet(entry)}`;
-    const content = document.createElement('textarea'); content.value = entry.content; content.oninput = () => { entry.content = content.value; dirtyLorebook(); token.textContent = `≈ ${estimatePromptTokens(content.value)} tokens`; renderLorebookTokenTotal(); };
+    const content = document.createElement('textarea'); content.placeholder = '支持 {{char}}、{{user}}、{{char_status}}（当前情绪）、{{char_status_rules}}（情绪规则）、{{current_time}}（本轮时间）'; content.value = entry.content; content.oninput = () => { entry.content = content.value; dirtyLorebook(); token.textContent = `≈ ${estimatePromptTokens(content.value)} tokens`; renderLorebookTokenTotal(); };
     const comment = document.createElement('textarea'); comment.className = 'compact-textarea'; comment.value = entry.comment || ''; comment.placeholder = '仅供用户阅读，不进入 Prompt'; comment.oninput = () => { entry.comment = comment.value; dirtyLorebook(); };
     card.append(grid, promptField('关键词 OR', keys), finalOutlet, promptField('正文', content), promptField('备注（不发送）', comment)); container.appendChild(card);
   });
@@ -397,7 +434,7 @@ function renderFetchedModels(models) {
 function fillProvider(kind) {
   const profile = selectedProvider(kind);
   if (!profile) { if (kind === 'llm') clearFetchedModels(); setKeyPlaceholder(kind, null); providerState(kind, '尚无 Profile，请新建并保存', 'dirty'); return; }
-  if (kind === 'llm') { $('llmName').value = profile.name; $('llmBaseUrl').value = profile.base_url; $('llmModel').value = profile.model; clearFetchedModels(); }
+  if (kind === 'llm') { if ($('llmPurpose')) $('llmPurpose').value = profile.purpose || 'chat'; $('llmName').value = profile.name; $('llmBaseUrl').value = profile.base_url; $('llmModel').value = profile.model; clearFetchedModels(); }
   if (kind === 'stt') { $('sttName').value = profile.name; $('sttEndpoint').value = profile.endpoint; $('sttStreamEndpoint').value = profile.stream_endpoint; $('sttResourceId').value = profile.resource_id; $('sttTwoPass').checked = profile.stream_two_pass !== false; }
   if (kind === 'tts') { $('ttsName').value = profile.name; $('ttsProviderType').value = profile.provider_type || 'http'; $('ttsEndpoint').value = profile.endpoint; $('ttsResourceId').value = profile.resource_id; $('ttsVoiceType').value = profile.voice_type; $('ttsEmotion').value = profile.emotion || ''; $('ttsEnableEmotion').checked = Boolean(profile.enable_emotion); $('ttsEmotionScale').value = profile.emotion_scale ?? 4; $('ttsSpeedRatio').value = profile.speed_ratio ?? 1; $('ttsRequestTemplate').value = JSON.stringify(profile.request_template || {}, null, 2); }
   setKeyPlaceholder(kind, profile);
@@ -420,7 +457,7 @@ function newProvider(kind) {
 }
 function providerPayload(kind) {
   const current = selectedProvider(kind); if (!current) throw new Error('请先新建 Profile');
-  if (kind === 'llm') return { id: current.id, name: $('llmName').value.trim(), provider_type: 'openai_compatible', base_url: $('llmBaseUrl').value.trim(), api_key: $('llmApiKey').value, model: $('llmModel').value.trim() };
+  if (kind === 'llm') return { id: current.id, name: $('llmName').value.trim(), provider_type: 'openai_compatible', purpose: $('llmPurpose')?.value || 'chat', base_url: $('llmBaseUrl').value.trim(), api_key: $('llmApiKey').value, model: $('llmModel').value.trim() };
   if (kind === 'stt') return { id: current.id, name: $('sttName').value.trim(), provider_type: 'volcengine', endpoint: $('sttEndpoint').value.trim(), stream_endpoint: $('sttStreamEndpoint').value.trim(), resource_id: $('sttResourceId').value.trim(), api_key: $('sttApiKey').value, stream_two_pass: $('sttTwoPass').checked };
   let requestTemplate; try { requestTemplate = JSON.parse($('ttsRequestTemplate').value || '{}'); } catch { throw new Error('TTS Request Template 不是合法 JSON'); }
   return { id: current.id, name: $('ttsName').value.trim(), provider_type: $('ttsProviderType').value, endpoint: $('ttsEndpoint').value.trim(), resource_id: $('ttsResourceId').value.trim(), api_key: $('ttsApiKey').value, voice_type: $('ttsVoiceType').value.trim(), request_template: requestTemplate, emotion: $('ttsEmotion').value.trim(), enable_emotion: $('ttsEnableEmotion').checked, emotion_scale: Number($('ttsEmotionScale').value) || 4, speed_ratio: Number($('ttsSpeedRatio').value) || 1 };
@@ -432,11 +469,18 @@ async function persistProviderDraft(kind) {
   renderProviderProfiles(kind, payload.id);
   return payload.id;
 }
-async function saveProvider(kind) { const profileId = await persistProviderDraft(kind); await activateProvider(kind, profileId); }
+async function saveProvider(kind) { const profileId = await persistProviderDraft(kind); if (kind !== 'llm') await activateProvider(kind, profileId); }
 async function deleteProvider(kind) { const profile = selectedProvider(kind); if (!profile) return; settings.provider_profiles = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profile.id)}`, { method: 'DELETE' }); renderProviderProfiles(kind); providerState(kind, '已删除；当前选择已更新', 'saved'); }
 function formatProbe(result) { return Object.entries(result.stages || {}).map(([name, value]) => `${name}: ${value.status}${value.detail ? `（${value.detail}）` : ''}`).join('；'); }
+async function testLlmConnection() {
+  const profileId = await persistProviderDraft('llm');
+  providerState('llm', '正在检查连接：GET /models，不调用模型生成…');
+  const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profileId)}/connection`, {method: 'POST'});
+  if (result.ok) renderFetchedModels(result.models || []);
+  providerState('llm', result.ok ? '连接检查成功：已获取模型列表；未调用模型，尚未验证生成能力' : formatProbe(result), result.ok ? 'saved' : 'dirty');
+}
 async function testProvider(kind) { const profileId = await persistProviderDraft(kind); providerState(kind, '正在执行真实最小请求…'); const result = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profileId)}/test`, { method: 'POST' }); providerState(kind, formatProbe(result), result.ok ? 'saved' : 'dirty'); if (kind === 'tts' && result.audio_base64) playAudio({ audio_base64: result.audio_base64, audio_mime: result.audio_mime, latency: {} }); }
-async function fetchModels() { const profileId = await persistProviderDraft('llm'); providerState('llm', '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profileId)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || []); providerState('llm', result.ok ? `已拉取 ${result.models.length} 个模型；请从下拉框选择，或手动输入` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
+async function fetchModels() { const profileId = await persistProviderDraft('llm'); providerState('llm', '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profileId)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || []); providerState('llm', result.ok ? `已拉取 ${result.models.length} 个模型名称；仅查询列表，未调用模型` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
 
 async function start() {
   if (recording || startPromise || processing) return;
@@ -696,10 +740,14 @@ window.onkeydown = event => { if (capturingKey) { event.preventDefault(); event.
 window.onkeyup = event => { if (!capturingKey && event.code === key) { event.preventDefault(); stop(); } };
 $('playPause').onclick = toggleAudio;
 $('stopAudio').onclick = () => { stopAudio(); status('Idle'); };
-$('showLlmDebug').onclick = showLlmDebug;
 $('closeLlmDebug').onclick = () => $('llmDebugDialog').close();
 $('llmDebugDialog').onclick = event => { if (event.target === $('llmDebugDialog')) $('llmDebugDialog').close(); };
-$('historyDepth').oninput = () => setHistoryDepthState('有未保存修改；保存前不会用于下一轮', 'dirty');
+let historyPreviewTimer;
+function historyRangeChanged() { toggleHistorySelection(); setHistoryDepthState('有未保存修改；保存前不会用于下一轮', 'dirty'); clearTimeout(historyPreviewTimer); historyPreviewTimer = setTimeout(() => void previewHistoryRange().catch(e => $('historyRangePreview').textContent = e.message), 250); }
+$('historyDepth').oninput = historyRangeChanged;
+$('historySince').oninput = historyRangeChanged;
+$('historyMode').onchange = historyRangeChanged;
+$('previewHistoryRange').onclick = () => void previewHistoryRange().catch(e => $('historyRangePreview').textContent = e.message);
 $('saveHistoryDepth').onclick = () => void saveHistoryDepth().catch(error => setHistoryDepthState(error.message, 'dirty'));
 $('playback').oninput = event => { if (currentAudio && Number.isFinite(currentAudio.duration)) currentAudio.currentTime = currentAudio.duration * event.target.value / 100; };
 $('promptPreset').onchange = event => { const next = event.target.value; if (promptDirty && !confirm('当前 Preset 有未保存修改，切换将丢弃这些修改。继续吗？')) { event.target.value = settings.prompt_presets.active_preset_id; return; } void activatePromptPreset(next).catch(error => { renderPromptPresets(settings.prompt_presets.active_preset_id); setPromptState(error.message, 'dirty'); }); };
@@ -707,6 +755,7 @@ $('captureKey').onclick = () => { capturingKey = true; $('captureKey').textConte
 $('keyInput').onclick = () => $('captureKey').click();
 $('saveKey').onclick = () => { key = pendingKey; localStorage.pttKey = key; $('keyInput').value = formatHotkey(key); setKeyState(`已保存并立即生效：${formatHotkey(key)}（无需重启）`, 'saved'); };
 $('promptPresetName').oninput = () => { const preset = selectedPromptPreset(); if (preset) preset.name = $('promptPresetName').value; dirtyPrompt(); };
+$('promptTemperature').oninput = () => { updatePromptTemperature(); dirtyPrompt(); };
 $('savePromptPreset').onclick = () => void saveCurrentPromptPreset().catch(error => setPromptState(error.message, 'dirty'));
 $('newPromptPreset').onclick = () => void newPromptPreset().catch(error => setPromptState(error.message, 'dirty'));
 $('copyPromptPreset').onclick = () => void copyCurrentPromptPreset().catch(error => setPromptState(error.message, 'dirty'));
@@ -757,13 +806,13 @@ $('newConversation').onclick = () => { void createConversation().catch(error => 
 $('saveConversation').onclick = () => { void persistConversation().catch(error => alert(error.message)); };
 $('toggleConversation').onclick = () => { conversationExpanded = !conversationExpanded; renderConversation(); };
 $('clearConversation').onclick = () => { messages = []; conversationExpanded = false; saveLlmDebug(null); renderConversation(); void persistConversation().catch(error => alert(error.message)); };
-$('llmProfile').onchange = event => void activateProvider('llm', event.target.value).catch(error => providerState('llm', error.message, 'dirty')); $('sttProfile').onchange = event => void activateProvider('stt', event.target.value).catch(error => providerState('stt', error.message, 'dirty')); $('ttsProfile').onchange = event => void activateProvider('tts', event.target.value).catch(error => providerState('tts', error.message, 'dirty'));
+$('llmProfile').onchange = () => fillProvider('llm'); if ($('activateLlmProfile')) $('activateLlmProfile').onclick = () => void activateProvider('llm', $('llmProfile').value).catch(error => providerState('llm', error.message, 'dirty')); $('sttProfile').onchange = event => void activateProvider('stt', event.target.value).catch(error => providerState('stt', error.message, 'dirty')); $('ttsProfile').onchange = event => void activateProvider('tts', event.target.value).catch(error => providerState('tts', error.message, 'dirty'));
 $('newLlmProfile').onclick = () => newProvider('llm'); $('newSttProfile').onclick = () => newProvider('stt'); $('newTtsProfile').onclick = () => newProvider('tts');
 $('deleteLlmProfile').onclick = () => void deleteProvider('llm').catch(error => providerState('llm', error.message, 'dirty')); $('deleteSttProfile').onclick = () => void deleteProvider('stt').catch(error => providerState('stt', error.message, 'dirty')); $('deleteTtsProfile').onclick = () => void deleteProvider('tts').catch(error => providerState('tts', error.message, 'dirty'));
 $('saveLlmProfile').onclick = () => void saveProvider('llm').catch(error => providerState('llm', error.message, 'dirty')); $('saveSttProfile').onclick = () => void saveProvider('stt').catch(error => providerState('stt', error.message, 'dirty')); $('saveTtsProfile').onclick = () => void saveProvider('tts').catch(error => providerState('tts', error.message, 'dirty'));
 $('llmFetchedModels').onchange = event => { if (!event.target.value) return; $('llmModel').value = event.target.value; providerState('llm', `已选择模型：${event.target.value}；点击保存后从下一轮启用`, 'dirty'); };
 $('llmModel').oninput = event => { const select = $('llmFetchedModels'); if (!select.disabled) select.value = [...select.options].some(option => option.value === event.target.value.trim()) ? event.target.value.trim() : ''; };
-$('testLlmProfile').onclick = () => void testProvider('llm').catch(error => providerState('llm', error.message, 'dirty')); $('testSttProfile').onclick = () => void testProvider('stt').catch(error => providerState('stt', error.message, 'dirty')); $('testTtsProfile').onclick = () => void testProvider('tts').catch(error => providerState('tts', error.message, 'dirty')); $('fetchLlmModels').onclick = () => void fetchModels().catch(error => providerState('llm', error.message, 'dirty'));
+$('testLlmProfile').onclick = () => void testLlmConnection().catch(error => providerState('llm', error.message, 'dirty')); $('testLlmGeneration').onclick = () => void testProvider('llm').catch(error => providerState('llm', error.message, 'dirty')); $('testSttProfile').onclick = () => void testProvider('stt').catch(error => providerState('stt', error.message, 'dirty')); $('testTtsProfile').onclick = () => void testProvider('tts').catch(error => providerState('tts', error.message, 'dirty')); $('fetchLlmModels').onclick = () => void fetchModels().catch(error => providerState('llm', error.message, 'dirty'));
 function b64(bytes) { let binary = ''; bytes.forEach(byte => { binary += String.fromCharCode(byte); }); return btoa(binary); }
 function resample(samples, sourceRate, targetRate = 16000) { if (sourceRate === targetRate) return samples; const ratio = sourceRate / targetRate; const output = new Float32Array(Math.round(samples.length / ratio)); for (let i = 0; i < output.length; i += 1) { const start = Math.floor(i * ratio); const end = Math.min(samples.length, Math.floor((i + 1) * ratio)); let sum = 0; for (let j = start; j < end; j += 1) sum += samples[j]; output[i] = sum / Math.max(1, end - start); } return output; }
 function encodePcm16(samples, sampleRate) { const pcm = resample(samples, sampleRate, 16000); const buffer = new ArrayBuffer(pcm.length * 2); const view = new DataView(buffer); pcm.forEach((sample, index) => view.setInt16(index * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true)); return buffer; }

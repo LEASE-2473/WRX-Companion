@@ -82,16 +82,34 @@ from .providers import VolcengineStt
 @asynccontextmanager
 async def lifespan(app):
     companion_store.recover_interrupted()
+    from .autonomy import archive_settings
+    archive_settings()
     scheduler = asyncio.create_task(run_scheduler())
+    from .role_memory import scheduler as run_memory_scheduler
+    memory_scheduler = asyncio.create_task(run_memory_scheduler())
     try:
         yield
     finally:
         scheduler.cancel()
+        memory_scheduler.cancel()
+        from .autonomy import shutdown as shutdown_activities
+        await shutdown_activities()
+        from .role_state import shutdown as shutdown_emotions
+        await shutdown_emotions()
+        await asyncio.gather(memory_scheduler, return_exceptions=True)
         await asyncio.gather(scheduler, return_exceptions=True)
         await core.shutdown()
 
 app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)
 app.include_router(companion_router)
+from .role_memory_routes import router as role_memory_router
+app.include_router(role_memory_router)
+from .chat_skill_routes import router as chat_skill_router
+app.include_router(chat_skill_router)
+from .role_state_routes import router as role_state_router
+app.include_router(role_state_router)
+from .autonomy_routes import router as autonomy_router
+app.include_router(autonomy_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 PROVIDER_ROUND_SNAPSHOTS: dict[str, object] = {}
@@ -455,6 +473,12 @@ async def save_provider_profile(kind: str, profile_id: str, value: dict):
 
 @app.delete("/api/provider-profiles/{kind}/{profile_id}")
 async def remove_provider_profile(kind: str, profile_id: str):
+    if kind == 'llm':
+        from .role_state import config as emotion_settings
+        from .role_memory import settings as memory_settings
+        mem=memory_settings()
+        if profile_id in [emotion_settings().llm_profile_id,emotion_settings().contact_llm_profile_id] or any(p.llm_profile_id==profile_id for p in mem.presets.values()) or profile_id in [mem.embedding_profile_id,mem.rerank_profile_id]:
+            raise HTTPException(status_code=409,detail='该Profile被角色状态或角色记忆使用，请先解除绑定')
     if kind == "llm" and any(char.llm_profile_id == profile_id for char in companion_store.list_characters()):
         raise HTTPException(status_code=409, detail="该 LLM 已绑定角色，请先解除角色绑定")
     if kind == "tts" and any(char.tts_profile_id == profile_id for char in companion_store.list_characters()):
@@ -465,10 +489,11 @@ async def remove_provider_profile(kind: str, profile_id: str):
 async def activate_provider_profile(kind: str, value: ProviderActiveUpdate):
     try:
         return public_provider_profiles(set_active_provider_profile(_provider_kind(kind), value.profile_id))
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @app.post("/api/provider-profiles/llm/{profile_id}/models")
+@app.post("/api/provider-profiles/llm/{profile_id}/connection")
 async def provider_models(profile_id: str):
     try:
         try:
@@ -494,6 +519,13 @@ async def test_llm_provider(profile_id: str):
         problem = _configuration_problem("llm", profile)
         if problem:
             return _configuration_failure(problem)
+        if profile.purpose in {'embedding','rerank'}:
+            from .vector_memory_store import get_embeddings, get_rerank_scores
+            from .models import VectorMemoryConfig
+            config = VectorMemoryConfig(api_url=profile.base_url, api_key=profile.api_key, model=profile.model, rerank_url=profile.base_url.rstrip('/') if profile.base_url.rstrip('/').endswith('/rerank') else profile.base_url.rstrip('/')+'/rerank', rerank_key=profile.api_key, rerank_model=profile.model)
+            if profile.purpose == 'embedding': await get_embeddings(['连接测试'], config)
+            else: await get_rerank_scores('测试',['连接测试'],config)
+            return {"ok":True,"stages":{"real_request":{"status":"passed","detail":profile.purpose+" 请求成功"}}}
         delta = await test_llm_stream(profile)
         return {"ok": True, "sample": delta[:80], "stages": {"configuration": {"status": "passed"}, "network_auth": {"status": "passed"}, "real_request": {"status": "passed", "detail": "已收到流式正文增量"}}}
     except Exception as exc:

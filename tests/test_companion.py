@@ -106,7 +106,8 @@ def test_search_modes_and_saved_sources(llm, monkeypatch, mode, decision, expect
         assert len(result['assistant_message']['sources']) == expected_calls
         assert len(result['extra_usage']) == (1 if mode == 'AUTO' else 0)
         if expected_calls:
-            assert '天气来源' in llm.calls[-1][-1].content
+            assert any('天气来源' in m.content for m in llm.calls[-1][:-1])
+            assert llm.calls[-1][-1].role == 'user'
 
 
 def test_search_on_disabled_is_clear_error_and_auto_can_chat(llm):
@@ -127,7 +128,8 @@ def test_search_failure_does_not_claim_success(llm, monkeypatch):
         cid = client.post('/api/conversations').json()['id']
         result = events(send(client, cid, mode='AUTO'))[-1]
         assert result['search']['status'] == 'failed'
-        assert '不得声称已查证' in llm.calls[-1][-1].content
+        assert any('不得声称已查证' in m.content for m in llm.calls[-1][:-1])
+        assert llm.calls[-1][-1].role == 'user'
 
 
 def test_duplicate_running_request_and_detached_persistence(llm):
@@ -143,6 +145,33 @@ def test_duplicate_running_request_and_detached_persistence(llm):
         await job.task
         assert len(store.get_conversation(conversation.id).messages) == 2
         assert len(llm.calls) == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('started', [False, True])
+def test_manual_stop_releases_conversation_and_retry(llm, started):
+    async def scenario():
+        conversation = store.create_conversation()
+        other = store.create_conversation()
+        llm.delay = 60
+        job = core.submit(conversation.id, 'stop-me', '保留用户消息', 'Asia/Shanghai', search_mode='OFF')
+        if started:
+            await asyncio.sleep(0.02)
+        with pytest.raises(KeyError):
+            await core.cancel(other.id, 'stop-me')
+        assert not job.task.done()
+        await core.cancel(conversation.id, 'stop-me')
+        assert job.task.done()
+        assert store.get_request('stop-me')['error'] == '已手动停止生成'
+        saved = store.get_conversation(conversation.id)
+        assert saved.pending_request_id is None
+        assert len(saved.messages) == 1
+        assert job.events[-1]['detail'] == '已手动停止生成'
+        llm.delay = 0
+        retry = core.submit(conversation.id, 'stop-me', '保留用户消息', 'Asia/Shanghai', search_mode='OFF')
+        await retry.task
+        assert len(store.get_conversation(conversation.id).messages) == 2
+        assert (await core.cancel(conversation.id, 'stop-me'))['status'] == 'complete'
     asyncio.run(scenario())
 
 
@@ -203,17 +232,64 @@ def test_heartbeat_limits_and_invalid_decision(llm):
     asyncio.run(scenario())
 
 
+def test_heartbeat_explore_launches_without_private_payload(llm, monkeypatch):
+    from app import autonomy
+    monkeypatch.setattr(autonomy, 'FEATURE_ARCHIVED', False)
+    launched = []
+    monkeypatch.setattr(autonomy, 'launch', lambda *args: launched.append(args))
+    llm.reply = '{"action":"EXPLORE","reason":"SECRET 工作内容"}'
+    async def scenario():
+        conv = store.create_conversation()
+        store.save_heartbeat(conv.id, HeartbeatSettings(enabled=True, cooldown_minutes=0, quiet_enabled=False))
+        autonomy.save_settings(autonomy.Settings(enabled=True, automatic=True, provider='search', conversation_ids=[conv.id]).model_dump())
+        job, error = core.heartbeat(conv.id)
+        assert not error
+        await job.task
+        assert store.get_request(job.request_id)['status'] == 'complete'
+        assert launched == [(conv.id, job.request_id)]
+        assert not store.get_conversation(conv.id).messages
+        assert 'EXPLORE' in llm.calls[0][-1].content
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('action',['NO_ACTION','SEND_MESSAGE','EXPLORE'])
+def test_archived_heartbeat_only_messages_or_silence(llm,monkeypatch,action):
+    from app import autonomy
+    monkeypatch.setattr(autonomy,'FEATURE_ARCHIVED',True)
+    launched = []
+    monkeypatch.setattr(autonomy,'launch',lambda *args: launched.append(args))
+    llm.reply = json.dumps({'action':action,'message':'想和你聊聊'})
+    async def scenario():
+        conv = store.create_conversation()
+        store.save_heartbeat(conv.id,HeartbeatSettings(enabled=True,cooldown_minutes=0,quiet_enabled=False))
+        store.save_setting('autonomy',{'enabled':True,'automatic':True,'provider':'search','conversation_ids':[conv.id]})
+        job,error = core.heartbeat(conv.id)
+        assert not error
+        await job.task
+        request = store.get_request(job.request_id)
+        assert request['status'] == ('error' if action == 'EXPLORE' else 'complete')
+        assert 'EXPLORE' not in llm.calls[0][-1].content and not launched
+        messages = store.get_conversation(conv.id).messages
+        assert len(messages) == (1 if action == 'SEND_MESSAGE' else 0)
+        if messages: assert messages[0].source == 'heartbeat'
+    asyncio.run(scenario())
+
+
 def test_scheduler_claims_once_without_browser(llm):
     llm.reply = '{"action":"SEND_MESSAGE","message":"后台主动消息"}'
     async def scenario():
         conversation = store.create_conversation()
+        message = store.new_message('user', '昨天聊过', 'Asia/Shanghai', 'web', None)
+        message.timestamp = (store.utcnow() - timedelta(hours=24)).isoformat()
+        with store.database() as db:
+            store._insert_message(db, conversation.id, message)
         store.save_heartbeat(conversation.id, HeartbeatSettings(enabled=True, cooldown_minutes=0))
         with store.database() as db:
             db.execute('UPDATE conversations SET next_heartbeat_at=? WHERE id=?', ((store.utcnow() - timedelta(minutes=1)).isoformat(), conversation.id))
         await heartbeat.tick()
         await heartbeat.tick()
         await asyncio.gather(*(job.task for job in list(core.jobs.values())))
-        assert len(store.get_conversation(conversation.id).messages) == 1
+        assert len(store.get_conversation(conversation.id).messages) == 2
         assert len(llm.calls) == 1
     asyncio.run(scenario())
 
@@ -420,7 +496,7 @@ def test_voice_transcript_uses_same_core_preserves_raw_and_saves(llm, monkeypatc
 
 
 @pytest.mark.parametrize('source', ['web', 'voice', 'heartbeat'])
-def test_dynamic_time_only_changes_current_user_suffix(monkeypatch, source):
+def test_dynamic_time_and_status_only_change_d1_system(monkeypatch, source):
     from datetime import datetime, timezone
     from app.prompt_store import default_wrx_preset
     from app.models import Lorebook
@@ -438,12 +514,75 @@ def test_dynamic_time_only_changes_current_user_suffix(monkeypatch, source):
         second, _ = core.context(conversation, character, '本轮正文', source, default_wrx_preset(), Lorebook(id='empty', name='空'))
         changes = [i for i, (a, b) in enumerate(zip(first.messages, second.messages)) if a != b]
         assert len(first.messages) == len(second.messages)
-        assert len(changes) == 1
+        assert changes == [len(first.messages)-2]
         index = changes[0]
-        assert first.messages[index].role == 'user'
-        assert first.messages[index].content.startswith('本轮正文\n\n[服务器提供的本轮时间：')
+        assert first.messages[index].role == 'system'
+        assert '[服务器提供的本轮时间：' in first.messages[index].content
+        assert first.messages[-1].role == 'user'
+        assert first.messages[-1].content == second.messages[-1].content == '本轮正文'
         assert first.messages[:index] == second.messages[:index]
         assert all('服务器提供的本轮时间' not in m.content for m in first.messages[:index])
         assert any('历史正文' in m.content for m in first.messages[:index])
         assert conversation.messages[0].content == '历史正文'
         assert first.trace['final_messages'] == [m.model_dump() for m in first.messages]
+
+def test_context_preview_and_persisted_last_are_separate(llm):
+    with TestClient(app) as client:
+        cid = client.post('/api/conversations').json()['id']
+        assert client.get(f'/api/conversations/{cid}/context-last').json()['debug'] is None
+        preview = client.post(f'/api/conversations/{cid}/context-preview', json={'content': '仅用于预填充'})
+        assert preview.status_code == 200, preview.text
+        assert any('仅用于预填充' in m['content'] for m in preview.json()['llm_messages'])
+        assert not llm.calls and not store.get_conversation(cid).messages
+        with store.database() as db:
+            assert db.execute('SELECT COUNT(*) FROM requests').fetchone()[0] == 0
+        result = events(send(client, cid, '正式消息'))[-1]
+        last = client.get(f'/api/conversations/{cid}/context-last').json()
+        assert last['debug']['llm_messages'] == result['debug']['llm_messages']
+        assert last['debug']['llm_raw'] == llm.reply
+        other = client.post('/api/conversations').json()['id']
+        assert client.get(f'/api/conversations/{other}/context-last').json()['debug'] is None
+        client.post(f'/api/conversations/{cid}/context-preview', json={'content': '另一个模拟'})
+        assert client.get(f'/api/conversations/{cid}/context-last').json()['request_id'] == last['request_id']
+        assert len(store.get_conversation(cid).messages) == 2
+
+@pytest.mark.parametrize('allow_silence', [False, True])
+def test_heartbeat_current_emotions_and_silence_prompt(llm, monkeypatch, allow_silence):
+    from app import role_state
+    monkeypatch.setattr(role_state, 'config', lambda: role_state.EmotionSettings(allow_silence=allow_silence))
+    llm.reply = '{"action":"SEND_MESSAGE","message":"来一起玩吧"}'
+    async def scenario():
+        conv = store.create_conversation()
+        store.save_heartbeat(conv.id, HeartbeatSettings(enabled=True, cooldown_minutes=0, quiet_enabled=False))
+        expected = role_state.state(conv.id)
+        job, error = core.heartbeat(conv.id)
+        assert error is None
+        await job.task
+        content = llm.calls[-1][-1].content
+        payload = json.loads(content.split('\n', 1)[1])
+        assert payload['state']['values'] == expected['values']
+        assert 'threshold' not in payload['state']
+        assert '未达到' not in content and '无需为了' not in content
+        assert 'NO_ACTION' in content and 'SEND_MESSAGE' in content
+        assert '本次唤醒请主动联系' not in content
+        assert 'motives' not in payload['state']
+        assert '不能仅凭时间' in content
+        trace = json.loads(store.heartbeat_logs(conv.id, 1)[0]['result'])['debug']['prompt_trace']
+        assert trace['companion_state']['threshold'] == 60
+    asyncio.run(scenario())
+
+
+def test_scheduler_below_current_threshold_still_calls_model(llm, monkeypatch):
+    from app import role_state
+    monkeypatch.setattr(role_state, 'state', lambda cid: {'desire_to_act': 59, 'threshold': 60, 'phase': '冷却中'})
+    calls = []
+    monkeypatch.setattr(core, 'heartbeat', lambda cid: calls.append(cid))
+    async def scenario():
+        conv = store.create_conversation()
+        store.save_heartbeat(conv.id, HeartbeatSettings(enabled=True, cooldown_minutes=0, quiet_enabled=False))
+        with store.database() as db:
+            db.execute('UPDATE conversations SET next_heartbeat_at=? WHERE id=?', ((store.utcnow() - timedelta(minutes=1)).isoformat(), conv.id))
+        await heartbeat.tick()
+        assert calls == [conv.id]
+        assert not store.heartbeat_logs(conv.id, 1)
+    asyncio.run(scenario())

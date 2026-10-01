@@ -44,7 +44,7 @@ ST_FLAT_GENERATION_FIELDS = {
     "openai_max_tokens", "seed", "n",
 }
 ST_MACRO = re.compile(r"\{\{[^{}]+\}\}")
-SUPPORTED_PROMPT_MACROS = {"user", "char"}
+SUPPORTED_PROMPT_MACROS = {"user", "char", "char_status", "char_status_rules", "current_time"}
 
 
 def default_wrx_preset() -> PromptPreset:

@@ -47,7 +47,7 @@ class _Injection:
 
 
 _TOKEN_PIECES = re.compile(r"[\u3400-\u9fff]|[A-Za-z0-9_]+|[^\s]")
-_PROMPT_MACRO = re.compile(r"\{\{\s*(user|char)\s*\}\}", re.IGNORECASE)
+_PROMPT_MACRO = re.compile(r"\{\{\s*(user|char|char_status|char_status_rules|current_time)\s*\}\}", re.IGNORECASE)
 _PROMPT_MACRO_VALUES = {"user": "用户", "char": "当前角色"}
 
 
@@ -78,7 +78,7 @@ def _expand_prompt_macros(text: str, values=None) -> tuple[str, dict[str, int]]:
     def replace(match: re.Match[str]) -> str:
         name = match.group(1).lower()
         expansions[name] = expansions.get(name, 0) + 1
-        return (values or _PROMPT_MACRO_VALUES)[name]
+        return (values or _PROMPT_MACRO_VALUES).get(name, '')
 
     return _PROMPT_MACRO.sub(replace, text), expansions
 
@@ -153,6 +153,9 @@ def compile_prompt(
     marker_contents: dict[str, str] | None = None,
     current_user_suffix: str = "",
     current_images: list[str] | None = None,
+    char_status: str = "",
+    char_status_rules: str = "",
+    current_time: str = "",
 ) -> PromptCompileResult:
     """编译最终 OpenAI-compatible messages，并返回同源 Trace。"""
     if history_depth < 0:
@@ -165,8 +168,11 @@ def compile_prompt(
     ]
     selected_history = clean_history[-history_depth:] if history_depth else []
     # 本轮元数据只附加到当前输入，不参与世界书关键词激活。
-    current_content = current_user_message + ("\n\n" + current_user_suffix if current_user_suffix else "")
+    current_content = current_user_message
+    current_time = current_time or current_user_suffix
     chat_messages = selected_history + [ChatMessage(role="user", content=current_content, images=current_images or [])]
+    current_message = chat_messages[-1]
+    macro_values = {'char': character_name, 'user': user_name, 'char_status': char_status, 'char_status_rules': char_status_rules, 'current_time': current_time}
     scan_messages = clean_history + [ChatMessage(role="user", content=current_user_message)]
 
     activation_trace: list[dict[str, Any]] = []
@@ -186,7 +192,7 @@ def compile_prompt(
         })
         if not active:
             continue
-        content, expansions = _expand_prompt_macros(entry.content.strip(), {"char": character_name, "user": user_name})
+        content, expansions = _expand_prompt_macros(entry.content.strip(), macro_values)
         if expansions:
             macro_expansions[f"lorebook:{entry.id}"] = expansions
         compiled_entry = entry.model_copy(update={"content": content})
@@ -242,7 +248,7 @@ def compile_prompt(
             continue
         if prompt.injection_position == "in_chat":
             if prompt.content.strip():
-                content, expansions = _expand_prompt_macros(prompt.content.strip(), {"char": character_name, "user": user_name})
+                content, expansions = _expand_prompt_macros(prompt.content.strip(), macro_values)
                 if expansions:
                     macro_expansions[prompt.identifier] = expansions
                 injections.append(_Injection("preset", prompt.identifier, prompt.role, content, prompt.injection_depth, prompt.injection_order, sequence))
@@ -251,7 +257,7 @@ def compile_prompt(
                 disabled.append({"identifier": prompt.identifier, "reason": "empty_content"})
             continue
         if prompt.content.strip():
-            content, expansions = _expand_prompt_macros(prompt.content.strip(), {"char": character_name, "user": user_name})
+            content, expansions = _expand_prompt_macros(prompt.content.strip(), macro_values)
             if expansions:
                 macro_expansions[prompt.identifier] = expansions
             relative_parts.append((prompt.identifier, [ChatMessage(role=prompt.role, content=content)]))
@@ -259,6 +265,19 @@ def compile_prompt(
             disabled.append({"identifier": prompt.identifier, "reason": "empty_content"})
 
     marker_trace: dict[str, Any] = {}
+    # 只有实际启用且参与编译的宏才能替代默认注入。
+    used_macros = {name for expansions in macro_expansions.values() for name in expansions}
+    if 'chatHistory' in expanded_markers:
+        if char_status_rules and 'char_status_rules' not in used_macros:
+            index = next(i for i, part in enumerate(relative_parts) if part[0] == 'chatHistory')
+            relative_parts.insert(index, ('char_status_rules', [ChatMessage(role='system', content=char_status_rules)]))
+        dynamic_parts = []
+        if char_status and 'char_status' not in used_macros:
+            dynamic_parts.append(char_status)
+        if current_time and 'current_time' not in used_macros:
+            dynamic_parts.append(current_time)
+        if dynamic_parts:
+            injections.append(_Injection('runtime', 'char_status_context', 'system', '\n\n'.join(dynamic_parts), 1, 100, sequence))
     for marker in MARKERS:
         marker_trace[marker] = {
             "native_content_included": marker in expanded_markers and bool((marker_contents or {}).get(marker)),
@@ -282,6 +301,16 @@ def compile_prompt(
             final_messages.extend(messages)
     if injections and not chat_history_seen:
         disabled.extend({"identifier": item.source_id, "reason": "chatHistory_marker_disabled"} for item in injections)
+
+    # 本轮 user 永远最后；保留其他条目的角色与相互顺序。
+    if chat_history_seen:
+        old = list(final_messages)
+        near_ids = {id(old[item['actual_message_index']]) for item in injection_trace if item['requested_depth'] <= 1}
+        near_messages = [message for message in old if id(message) in near_ids]
+        final_messages = [message for message in old if message is not current_message and id(message) not in near_ids] + near_messages + [current_message]
+        new_indices = {id(message): i for i, message in enumerate(final_messages)}
+        for item in injection_trace:
+            item['actual_message_index'] = new_indices[id(old[item['actual_message_index']])]
 
     sent_lore_ids = {
         item["source_id"] for item in injection_trace if item["source"] == "lorebook"

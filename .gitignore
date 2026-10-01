@@ -27,3 +27,14 @@ Thumbs.db
 Desktop.ini
 *.tmp
 *.swp
+
+# 仅本地维护的开发连续性、规划、讨论与审计文档
+/[Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Oo][Vv][Ee][Rr][Vv][Ii][Ee][Ww].md
+/[Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Cc][Oo][Nn][Tt][Ee][Xx][Tt].md
+/[Cc][Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg].md
+/IMPLEMENTATION_PLAN.md
+/*[Dd][Ii][Ss][Cc][Uu][Ss][Ss][Ii][Oo][Nn]*.md
+/docs/WRX_AUDIT.md
+/docs/REFERENCE_RESEARCH.md
+/docs/PHASE4_AUTONOMY.md
+/docs/PHASE4_DEVELOPMENT_SUSPENSION.md

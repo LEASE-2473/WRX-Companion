@@ -1,11 +1,13 @@
 from fastapi.testclient import TestClient
 from app.main import app
 from app import main, provider_store
+import httpx
+from app.providers import OpenAICompatibleLlm
 
 
 def test_missing_profile_is_configuration_failure():
     with TestClient(app) as client:
-        for endpoint in ('llm/missing/models', 'llm/missing/test', 'stt/missing/test', 'tts/missing/test'):
+        for endpoint in ('llm/missing/models', 'llm/missing/connection', 'llm/missing/test', 'stt/missing/test', 'tts/missing/test'):
             result = client.post('/api/provider-profiles/' + endpoint).json()
             assert result['ok'] is False
             assert result['stages']['configuration']['status'] == 'failed'
@@ -31,3 +33,23 @@ def test_saved_draft_fetches_models_without_model_and_preserves_key(monkeypatch)
         draft.update(api_key='', model='deepseek-chat')
         client.put('/api/provider-profiles/llm/draft', json=draft)
         assert provider_store.get_profile('llm', 'draft').api_key == 'fake-test-key'
+
+
+def test_connection_and_model_list_only_issue_one_metadata_get_each(monkeypatch):
+    calls = []
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(200, json={'data': [{'id': 'flash'}, {'id': 'pro'}]})
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(OpenAICompatibleLlm, 'client', lambda self: upstream)
+    with TestClient(app) as client:
+        client.put('/api/provider-profiles/llm/metadata', json=dict(name='Metadata', base_url='https://example.test/v1', api_key='fake-key', model=''))
+        for endpoint in ('connection', 'models'):
+            count = len(calls)
+            result = client.post('/api/provider-profiles/llm/metadata/' + endpoint).json()
+            assert result['ok']
+            assert result['models'] == ['flash', 'pro']
+            assert len(calls) == count + 1
+            assert calls[-1].method == 'GET'
+            assert str(calls[-1].url) == 'https://example.test/v1/models'
+            assert calls[-1].content == b''

@@ -1,0 +1,232 @@
+<div id="emotion-lab">
+  <style>
+    #emotion-lab { color:var(--foreground); }
+    #emotion-lab .space { margin-block:16px; }
+    #emotion-lab .assumption { color:var(--purple); }
+    #emotion-lab .emotion-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:8px; }
+    #emotion-lab .emotion-choice { display:grid; gap:4px; text-align:start; }
+    #emotion-lab .emotion-choice .progress { width:100%; }
+    #emotion-lab .label-row { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+    #emotion-lab .section { margin-block:18px; }
+    #emotion-lab .chart { width:100%; display:block; height:220px; }
+    #emotion-lab .chart text { fill:var(--foreground); font-size:12px; }
+    #emotion-lab .swatch { display:inline-block; width:12px; height:3px; margin-inline-end:5px; vertical-align:middle; }
+    #emotion-lab .logs { padding-inline-start:20px; }
+    #emotion-lab .logs li { margin-block:6px; overflow-wrap:anywhere; }
+    #emotion-lab .radars { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:12px; }
+    #emotion-lab .radar { width:100%; height:280px; display:block; }
+    #emotion-lab .radar text { fill:var(--foreground); font-size:12px; }
+    #emotion-lab .formula-line { padding-block:6px; overflow-wrap:anywhere; }
+  </style>
+  <div class="viz-row"><h2>情绪实验台 · 精简版</h2><span class="viz-badge">六组 × 六项 · 独立模拟</span><span class="assumption">紫色 ◆ = 可微调的设计假设</span></div>
+  <div class="viz-controls space">
+    <label class="form-label">情境<select class="form-select" id="el-scene">
+      <option value="reunion">久别重逢</option><option value="low">User 很难受</option><option value="conflict">User 生气，Character 沮丧</option><option value="honeymoon">热恋，想一直聊天</option><option value="fight">争执后后悔</option><option value="busy">User 忙碌，想安静</option><option value="play">Character 出去玩回来</option><option value="reassure">User 好多了，给予安慰</option><option value="lonely">分别一整天</option><option value="jealous">吃醋与不安全感</option>
+    </select></label><button class="btn" id="el-apply">应用情境</button>
+    <button class="btn btn-primary" id="el-step">推进 15 分钟</button><button class="btn" id="el-hour">推进 1 小时</button><button class="btn" id="el-day">推进 24 小时</button>
+  </div>
+  <div class="viz-row"><strong id="el-clock" class="tabular-nums"></strong><label class="form-check"><input class="form-check-input" type="checkbox" id="el-auto" checked><span class="form-check-label">触发后模拟主动联系与冷却</span></label><button class="btn btn-ghost" id="el-reset">恢复默认实验</button></div>
+  <div class="viz-row space"><label class="form-check"><input class="form-check-input" type="checkbox" id="el-sampleuser"><span class="form-check-label">应用情境时填入示例 User 评分（手动模拟）</span></label></div>
+  <div class="section">
+    <h3>主动联系的内心拉扯</h3>
+    <div class="viz-controls">
+      <label class="form-label assumption">◆ 联系阈值 <output id="el-threshold-label"></output><input class="form-range" id="el-threshold" type="range" min="10" max="100" value="60"></label>
+      <label class="form-label assumption">◆ 联系冷却（小时）<input class="form-control" id="el-cooldown" type="number" min="0.25" max="48" step="0.25" value="2"></label>
+      <label class="form-label assumption">◆ User 情绪影响倍数<input class="form-control" id="el-userweight" type="number" min="0" max="3" step="0.1" value="1"></label>
+      <label class="form-label assumption">◆ Character 退缩影响倍数<input class="form-control" id="el-retreatweight" type="number" min="0" max="3" step="0.1" value="1"></label>
+    </div>
+    <div class="table-responsive"><table class="table table-sm"><thead><tr><th>动机</th><th>想靠近 +</th><th>想退缩 −</th><th>最终 / 阈值</th></tr></thead><tbody id="el-motives"></tbody></table></div>
+    <div id="el-decision" aria-live="polite"></div>
+    <details class="space" open><summary class="assumption">◆ 计算公式：每一项怎样改变数值</summary>
+      <div class="formula-line">① 强度 x：现在有多强（0–100）。程度 d：正在上升或下降（−5…+5）。两者独立。</div>
+      <div class="formula-line">② 每小时变化 = 常规变化 r + 每级推动 g × 程度 d + (3 ÷ 回归时长 H) × (常态 b − 当前 x)。</div>
+      <div class="formula-line">③ 例：担忧 x=65、b=10、d=+2、g=5、H=6、r=0。状态推动 +10，回归 −27.5，净变化 −17.5 / 小时。上升状态只是正向推动，最终强度仍可能下降。</div>
+      <div class="formula-line">④ 实际推进使用指数解：k=3/H；平衡点 q=b+(r+g×d)/k；新强度=限制到 0–100 [q+(x−q)×exp(−k×经过小时)]。状态到期时拆开演算，不用粗略乘法累加。</div>
+      <div class="formula-line">⑤ H 表示「无推动、无常规变化」时消除约 95% 偏离所需时间。状态默认持续 2 小时，到期 d=0。思念默认 r=+2，其长期平衡点因此高于常态。</div>
+      <div class="formula-line">⑥ 动机分数 = 限制到 0–100（想靠近的加权和 − 想退缩的加权和）。最高动机达到阈值且冷却结束才模拟唤醒；并不等于真实模型必然发消息。</div>
+      <table class="table table-sm"><tbody id="el-formulas"></tbody></table>
+    </details>
+  </div>
+  <hr>
+  <details class="section"><summary>User 心情：自己填写 / 六题自评</summary>
+    <div class="viz-row space"><span class="text-small">你的评分默认保持不变；没有 AI 推测。未填写项暂用 0，精力 65、疲惫 20 只是实验初值。问卷是自评换算，并非心理测评量表。</span><label class="form-check"><input id="el-userdecay" class="form-check-input" type="checkbox"><span class="form-check-label">允许 User 评分随模拟时间变化</span></label></div>
+    <div class="viz-controls"><label class="form-label">问卷分组<select class="form-select" id="el-questiongroup"></select></label></div>
+    <div id="el-questions" class="viz-controls space"></div>
+    <div class="viz-row"><button class="btn" id="el-questionapply">应用六题结果</button><span id="el-questionstatus" role="status" aria-live="polite"></span></div>
+    <div class="text-small space">每题：0 完全没有 / 1 轻微 / 2 中等 / 3 明显 / 4 很强。强度 = 答案 × 25；只更新当前组六项，不改其他组。状态程度归零，之后可以继续手动微调。</div>
+  </details>
+  <div class="section"><div class="viz-row"><h3>六维情绪雷达</h3><span><span class="swatch" style="background:var(--viz-series-1)"></span>Character 实线</span><span><span class="swatch" style="background:var(--viz-series-2)"></span>User 虚线</span></div><div id="el-radars" class="radars"></div></div>
+  <div class="viz-controls space"><label class="form-label">手动微调对象<select class="form-select" id="el-actor"><option value="char">Character 情绪</option><option value="user">User 心情（自己填写）</option></select></label><span id="el-count" class="text-small"></span></div>
+  <div class="card section">
+    <div class="viz-row"><h3 id="el-selected"></h3><span id="el-trend" class="viz-badge"></span></div>
+    <div class="viz-controls">
+      <label class="form-label">当前强度 <output id="el-value-label"></output><input id="el-value" class="form-range" type="range" min="0" max="100"></label>
+      <label class="form-label">状态程度 <output id="el-degree-label"></output><input id="el-degree" class="form-range" type="range" min="-5" max="5" step="1"></label>
+      <label class="form-label assumption">◆ 常态值<input class="form-control" id="el-base" type="number" min="0" max="100" step="1"></label>
+      <label class="form-label assumption">◆ 常规变化 / 小时<input class="form-control" id="el-drift" type="number" min="-20" max="20" step="0.25"></label>
+      <label class="form-label assumption">◆ 每级推动 / 小时<input class="form-control" id="el-gain" type="number" min="0" max="30" step="0.25"></label>
+      <label class="form-label assumption">◆ 回归常态时长 / 小时<input class="form-control" id="el-recovery" type="number" min="0.25" max="720" step="0.25"></label>
+      <label class="form-label assumption">◆ 当前状态剩余 / 小时<input class="form-control" id="el-duration" type="number" min="0" max="72" step="0.25"></label>
+    </div>
+    <div id="el-change" class="text-small tabular-nums"></div>
+  </div>
+  <div class="section"><div class="viz-row"><h3 id="el-chart-label">情绪轨迹</h3><span><span class="swatch" style="background:var(--viz-series-1)"></span>Character</span><span><span class="swatch" style="background:var(--viz-series-2)"></span>User</span></div><svg class="chart" id="el-chart" role="img" aria-label="所选情绪随模拟时间的强度变化"></svg></div>
+  <div id="el-emotions"></div>
+  <details class="section" open><summary>最近状态变化与模拟行动</summary><ol id="el-log" class="logs text-small"></ol></details>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('emotion-lab');
+  const $ = id => root.querySelector('#el-' + id);
+  const clamp = x => Math.max(0, Math.min(100, x));
+  // name, baseline, 95%-recovery hours, per-level hourly influence, constant hourly drift.
+  const groups = [
+    ['关系与依恋', [['亲近',65,168,1,0],['爱意',60,240,1,0],['信任',65,240,1,0],['依恋',45,72,2,0],['思念',20,12,4,2],['疏离',5,12,3,0]]],
+    ['喜悦与探索', [['喜悦',35,6,5,0],['兴奋',20,3,6,0],['满足',40,12,3,0],['期待',25,12,3,0],['希望',50,24,2,0],['好奇',40,12,3,0]]],
+    ['担忧与压力', [['担忧',10,6,5,0],['焦虑',10,4,5,0],['恐惧',5,3,6,0],['不安',10,6,4,0],['压力',15,8,4,0],['内疚',5,12,3,0]]],
+    ['愤怒与防御', [['生气',5,4,5,0],['委屈',5,12,3,0],['受伤',5,24,3,0],['防备',10,24,2,0],['悔恨',5,24,2,0],['嫉妒',5,6,4,0]]],
+    ['低落与退缩', [['悲伤',10,12,3,0],['沮丧',10,8,4,0],['退缩',5,8,4,0],['孤独',10,8,4,0],['空虚',10,12,3,0],['无聊',15,6,4,0]]],
+    ['身心与欲望', [['精力',65,8,4,0],['疲惫',20,8,4,0],['陪伴欲',40,12,3,0],['倾诉欲',25,6,4,0],['探索欲',35,12,3,0],['亲昵欲',35,12,3,0]]]
+  ];
+  const defs = groups.flatMap(([group, list]) => list.map(([name, base, recovery, gain, drift]) => ({group,name,base,recovery,gain,drift})));
+  const names = defs.map(d=>d.name);
+  const initial = actor => Object.fromEntries(defs.map(d => [d.name,{v:actor==='user' ? (d.name==='精力'?65:d.name==='疲惫'?20:0) : d.base,b:d.base,h:d.recovery,g:d.gain,r:d.drift,d:0,end:0}]));
+  let S = {version:2,t:0,char:initial('char'),user:initial('user'),actor:'char',selected:'思念',threshold:60,cooldown:2,uw:1,rw:1,lastAction:-1000,auto:true,userDecay:false,actions:0,quietUntil:0,log:[]};
+  let history=[];
+  const fmt = v => Number(v).toFixed(1);
+  const sign = v => v>0?'+'+fmt(v):fmt(v);
+  const level = d => d===0?'趋稳':(['微弱','缓慢','明显','快速','急剧'][Math.abs(d)-1]+(d>0?'上升':'下降'));
+  function snapshot() { const row={t:S.t,char:names.map(n=>S.char[n].v),user:names.map(n=>S.user[n].v)}; if(history.length && history.at(-1).t===S.t) history[history.length-1]=row;else history.push(row);if(history.length>300)history.shift(); }
+  function log(text) {S.log.unshift(`+${fmt(S.t)}h · ${text}`);S.log=S.log.slice(0,16);}
+  function get(a,n){return S[a][n].v;}
+  function motives(){
+    const c=n=>get('char',n),u=n=>get('user',n);
+    const reluctance=S.rw*(.25*c('悲伤')+.3*c('退缩')+.2*c('生气')+.15*c('疲惫'));
+    return [
+      {name:'靠近 / 陪聊',plus:.45*c('思念')+.25*c('依恋')+.2*c('陪伴欲')+.15*c('爱意')+.1*c('亲昵欲'),minus:reluctance+.3*c('疏离')},
+      {name:'安抚 / 关心',plus:S.uw*(.4*u('生气')+.45*u('悲伤')+.3*u('焦虑')+.2*u('委屈'))+.35*c('担忧')+.15*c('爱意'),minus:reluctance+.15*c('防备')},
+      {name:'修复 / 道歉',plus:.5*c('悔恨')+.35*c('内疚')+.2*c('爱意')+.15*S.uw*u('受伤'),minus:S.rw*(.4*c('生气')+.3*c('防备')+.2*c('委屈'))},
+      {name:'分享 / 探索',plus:.35*c('喜悦')+.3*c('兴奋')+.25*c('倾诉欲')+.2*c('探索欲')+.15*c('好奇'),minus:S.rw*(.3*c('疲惫')+.3*c('退缩')+.2*c('悲伤'))}
+    ].map(m=>({...m,score:clamp(m.plus-m.minus)}));
+  }
+  function strongest(){return motives().reduce((a,b)=>a.score>b.score?a:b);}
+  function event(a,n,value,degree,h=2){if(a==='user'&&!$('sampleuser').checked)return;Object.assign(S[a][n],{v:clamp(value),d:degree,end:S.t+h});}
+  function applyScene(scene){
+    const e=event;
+    const scenes={
+      reunion:()=>{e('char','思念',65,-2);e('char','喜悦',75,3);e('char','爱意',75,2);e('char','亲近',78,1);e('user','喜悦',70,2);},
+      low:()=>{e('user','悲伤',85,2,4);e('user','沮丧',65,2,4);e('char','担忧',65,3,4);e('char','陪伴欲',65,2,4);},
+      conflict:()=>{e('user','生气',90,3,4);e('user','委屈',70,2,4);e('char','沮丧',85,2,4);e('char','悲伤',80,2,4);e('char','退缩',85,3,4);e('char','担忧',50,2,4);},
+      honeymoon:()=>{e('char','爱意',90,2,8);e('char','依恋',90,2,8);e('char','思念',60,3,8);e('char','陪伴欲',90,2,8);e('char','亲昵欲',85,2,8);},
+      fight:()=>{e('char','生气',60,-3,4);e('char','悔恨',85,2,4);e('char','内疚',75,2,4);e('char','防备',40,-2,4);e('user','受伤',65,1,4);},
+      busy:()=>{S.quietUntil=S.t+4;e('user','压力',70,2,4);e('user','疲惫',60,2,4);e('char','思念',60,2,4);},
+      play:()=>{e('char','喜悦',85,2,3);e('char','兴奋',80,2,3);e('char','探索欲',80,2,3);e('char','倾诉欲',90,3,3);e('char','疲惫',40,1,3);},
+      reassure:()=>{e('user','悲伤',25,-3);e('user','生气',15,-3);e('user','焦虑',20,-3);e('char','担忧',25,-3);e('char','信任',85,2);e('char','退缩',20,-3);e('char','悲伤',25,-2);},
+      lonely:()=>{e('char','思念',85,2,6);e('char','孤独',70,2,6);e('char','陪伴欲',75,2,6);},
+      jealous:()=>{e('char','嫉妒',75,2,4);e('char','不安',70,2,4);e('char','依恋',65,2,4);e('char','信任',25,-2,4);e('char','担忧',50,1,4);}
+    };
+    scenes[scene]();log('情境：'+$('scene').selectedOptions[0].textContent+'（预设情绪冲击与状态）');snapshot();render();save();
+  }
+  function step(hours){
+    const stop=S.t+hours;
+    while(S.t<stop-1e-8){
+      let dt=Math.min(1/12,stop-S.t);
+      for(const a of ['char','user'])for(const n of names){const x=S[a][n];if(x.d && x.end>S.t && x.end<S.t+dt)dt=x.end-S.t;}
+      const before=strongest().score;
+      for(const a of ['char','user'])for(const n of names){const x=S[a][n];if(a==='user'&&!S.userDecay)continue;if(x.end<=S.t+1e-8)x.d=0;const k=3/x.h,drive=x.r+x.g*x.d;const target=x.b+drive/k;x.v=clamp(target+(x.v-target)*Math.exp(-k*dt));}
+      S.t+=dt;
+      for(const a of ['char','user'])for(const n of names){const x=S[a][n];if(x.end<=S.t+1e-8)x.d=0;}
+      const best=strongest();
+      if(S.auto && best.score>=S.threshold && S.t-S.lastAction>=S.cooldown && S.t>=S.quietUntil){
+        S.lastAction=S.t;S.actions++;log('模拟唤醒：'+best.name+'，行动值 '+fmt(best.score)+'；思念与倾诉欲减少 25，进入冷却');
+        for(const n of ['思念','倾诉欲']) S.char[n].v=clamp(S.char[n].v-25);
+        snapshot();
+      }else if(before<S.threshold && best.score>=S.threshold)log('动机越过阈值：'+best.name+' '+fmt(best.score));
+      snapshot();
+    }
+    log('推进 '+fmt(hours)+' 小时');render();save();
+  }
+  function editor(){
+    const x=S[S.actor][S.selected];$('selected').textContent=(S.actor==='char'?'Character':'User')+' · '+S.selected;
+    $('trend').textContent=level(x.d)+' '+(x.d>0?'+':'')+x.d;
+    for(const [id,key] of [['value','v'],['degree','d'],['base','b'],['drift','r'],['gain','g'],['recovery','h']])$(id).value=x[key];
+    $('duration').value=Math.max(0,x.end-S.t).toFixed(2);$('value-label').textContent=fmt(x.v);$('degree-label').textContent=(x.d>0?'+':'')+x.d;
+    const natural=3/x.h*(x.b-x.v),drive=x.d*x.g;
+    $('change').textContent=S.actor==='user'&&!S.userDecay?'User 评分保持你填写的数值，推进时间不会自动修改。':`当前每小时：常规 ${sign(x.r)} + 状态 ${sign(drive)} + 回归 ${sign(natural)} = ${sign(x.r+drive+natural)}；推动归零后向常态回归`;
+  }
+  function render(){
+    $('clock').textContent=`模拟时间 +${fmt(S.t)} 小时 · 已唤醒 ${S.actions} 次`;
+    $('threshold-label').textContent=S.threshold;$('threshold').value=S.threshold;$('cooldown').value=S.cooldown;$('userweight').value=S.uw;$('retreatweight').value=S.rw;$('auto').checked=S.auto;$('userdecay').checked=S.userDecay;$('actor').value=S.actor;
+    $('count').textContent=`每个对象 ${defs.length} 个变量 · 强度 0–100`;
+    $('motives').replaceChildren();
+    for(const m of motives()) {const tr=document.createElement('tr');for(const v of [m.name,'+'+fmt(m.plus),'−'+fmt(m.minus),fmt(m.score)+' / '+S.threshold]){const td=document.createElement('td');td.textContent=v;td.className='tabular-nums';tr.append(td);}$('motives').append(tr);}
+    const best=strongest(),left=Math.max(0,S.cooldown-(S.t-S.lastAction));
+    $('decision').textContent=S.t<S.quietUntil?`User 希望安静：剩余 ${fmt(S.quietUntil-S.t)} 小时，暂停主动联系` : left>0?`联系冷却中：剩余 ${fmt(left)} 小时；当前最强动机 ${best.name} ${fmt(best.score)}`:best.score>=S.threshold?`已达到唤醒条件：${best.name} ${fmt(best.score)}（推进时间后模拟判断）`:`暂不唤醒：${best.name} ${fmt(best.score)}，还差 ${fmt(S.threshold-best.score)}`;
+    $('emotions').replaceChildren();
+    for(const [group,list]of groups){const section=document.createElement('section');section.className='section';const heading=document.createElement('h3');heading.textContent=group;const grid=document.createElement('div');grid.className='emotion-grid';
+      for(const [name]of list){const x=S[S.actor][name],button=document.createElement('button');button.type='button';button.className='btn emotion-choice';button.setAttribute('aria-pressed',String(S.selected===name));button.setAttribute('aria-label',`${name} ${fmt(x.v)}，${level(x.d)} ${x.d}，点击微调`);const row=document.createElement('span');row.className='label-row';const label=document.createElement('span');label.textContent=name;const val=document.createElement('span');val.className='tabular-nums';val.textContent=fmt(x.v);row.append(label,val);const track=document.createElement('span');track.className='progress';track.setAttribute('aria-hidden','true');const bar=document.createElement('span');bar.className='progress-bar';bar.style.width=x.v+'%';bar.style.background='var(--viz-series-1)';track.append(bar);const trend=document.createElement('span');trend.className='text-small';trend.textContent=level(x.d)+(x.d?' '+(x.d>0?'+':'')+x.d:'');button.append(row,track,trend);button.onclick=()=>{S.selected=name;render();save();};grid.append(button);}
+      section.append(heading,grid);$('emotions').append(section);
+    }
+    editor();draw();drawRadars();$('log').replaceChildren();for(const text of S.log){const li=document.createElement('li');li.textContent=text;$('log').append(li);}
+  }
+  function applyQuestionnaire(groupIndex, answers){
+    if(!Number.isInteger(groupIndex)||!groups[groupIndex]||!Array.isArray(answers)||answers.length!==6||!answers.every(v=>Number.isInteger(v)&&v>=0&&v<=4))return false;
+    groups[groupIndex][1].forEach(([name],i)=>{Object.assign(S.user[name],{v:answers[i]*25,d:0,end:S.t});});
+    log('User 自评：'+groups[groupIndex][0]+'；六题答案 × 25，只更新本组');snapshot();render();save();return true;
+  }
+  function buildQuestionnaire(){
+    const picker=$('questiongroup');picker.replaceChildren();groups.forEach(([name],i)=>{const option=document.createElement('option');option.value=i;option.textContent=name;picker.append(option);});picker.value='0';
+    const build=()=>{
+      $('questions').replaceChildren();$('questionstatus').textContent='';
+      groups[Number(picker.value)][1].forEach(([name],i)=>{const label=document.createElement('label');label.className='form-label';label.textContent=`此刻「${name}」有多强？`;const select=document.createElement('select');select.className='form-select';select.id='el-answer-'+i;for(const [value,text]of [['','请选择'],['0','0 · 完全没有'],['1','1 · 轻微'],['2','2 · 中等'],['3','3 · 明显'],['4','4 · 很强']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}select.value='';label.append(select);$('questions').append(label);});
+    };
+    picker.onchange=build;build();
+    $('questionapply').onclick=()=>{const raw=Array.from({length:6},(_,i)=>$('answer-'+i).value);if(raw.some(v=>v==='')){$('questionstatus').textContent='请先完成六题；尚未更改数值。';return;}const index=Number(picker.value);if(applyQuestionnaire(index,raw.map(Number)))$('questionstatus').textContent='已更新 User 的「'+groups[index][0]+'」六项，可以继续手动调整。';};
+  }
+  function drawRadars(){
+    const parent=$('radars');parent.replaceChildren();
+    for(const [group,list]of groups){
+      const section=document.createElement('section'),heading=document.createElement('h3');heading.textContent=group;const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('radar');svg.setAttribute('role','img');section.append(heading,svg);parent.append(section);
+      const width=Math.max(270,svg.getBoundingClientRect().width||300),height=280,cx=width/2,cy=140,r=Math.min(88,width/2-70);svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+      const point=(i,value)=>{const angle=-Math.PI/2+i*Math.PI/3;return [cx+Math.cos(angle)*r*value/100,cy+Math.sin(angle)*r*value/100];};
+      const add=(tag,attrs,text)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;svg.append(el);return el;};
+      for(const v of [25,50,75,100])add('polygon',{points:list.map((_,i)=>point(i,v).join(',')).join(' '),fill:'none',stroke:'var(--border)','stroke-width':1});
+      list.forEach(([name],i)=>{const p=point(i,100),label=point(i,126);add('line',{x1:cx,y1:cy,x2:p[0],y2:p[1],stroke:'var(--border)'});add('text',{x:label[0],y:label[1],'text-anchor':i===0||i===3?'middle':i<3?'start':'end','dominant-baseline':'middle'},name);});
+      for(const [actor,color,dash]of [['char','var(--viz-series-1)',''],['user','var(--viz-series-2)','5 3']]){const values=list.map(([name])=>S[actor][name].v);add('polygon',{points:values.map((v,i)=>point(i,v).join(',')).join(' '),fill:color,'fill-opacity':.08,stroke:color,'stroke-width':2,'stroke-dasharray':dash});values.forEach((v,i)=>{const p=point(i,v);add('circle',{cx:p[0],cy:p[1],r:3,fill:color,'data-tooltip':`${actor==='char'?'Character':'User'} ${list[i][0]} ${fmt(v)}`});});}
+      add('text',{x:cx+5,y:cy-r-5},'100');svg.setAttribute('aria-label',group+'：'+list.map(([n])=>`${n} Character ${fmt(S.char[n].v)} User ${fmt(S.user[n].v)}`).join('；'));
+    }
+  }
+  function draw(){
+    const svg=$('chart'),w=Math.max(280,svg.getBoundingClientRect().width||600),h=220,left=48,right=20,top=15,bottom=44;
+    svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.replaceChildren();
+    const add=(tag,attrs,text)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;svg.append(el);return el;};
+    const start=history.length?history[0].t:0,end=Math.max(start+1,S.t),X=t=>left+(t-start)/(end-start)*(w-left-right),Y=v=>top+(100-v)/100*(h-top-bottom);
+    for(const v of [0,50,100]){add('line',{x1:left,y1:Y(v),x2:w-right,y2:Y(v),stroke:'var(--border)'});add('text',{x:left-8,y:Y(v)+4,'text-anchor':'end'},v);}
+    for(const t of [start,(start+end)/2,end])add('text',{x:X(t),y:h-bottom+20,'text-anchor':t===start?'start':t===end?'end':'middle'},fmt(t));
+    add('text',{x:left,y:h-4,'data-axis':'x'},'模拟时间（小时）');add('text',{x:4,y:12,'data-axis':'y'},'强度');
+    const idx=names.indexOf(S.selected);
+    for(const [a,color]of [['char','var(--viz-series-1)'],['user','var(--viz-series-2)']]){const rows=history.length?history:[{t:0,[a]:names.map(n=>S[a][n].v)}];add('polyline',{points:rows.map(r=>`${X(r.t)},${Y(r[a][idx])}`).join(' '),fill:'none',stroke:color,'stroke-width':2});add('circle',{cx:X(rows.at(-1).t),cy:Y(rows.at(-1)[a][idx]),r:3,fill:color,'data-tooltip':`${a==='char'?'Character':'User'} ${S.selected} ${fmt(rows.at(-1)[a][idx])}`});}
+    $('chart-label').textContent=S.selected+' · 情绪轨迹';svg.setAttribute('aria-label',`${S.selected}，Character ${fmt(S.char[S.selected].v)}，User ${fmt(S.user[S.selected].v)}，从 ${fmt(start)} 到 ${fmt(end)} 小时`);
+  }
+  function save(){
+    const packed=a=>names.map(n=>{const x=S[a][n];return [x.v,x.b,x.h,x.g,x.r,x.d,x.end].map(v=>Math.round(v*1000)/1000);});
+    const privateContent={version:2,t:S.t,actor:S.actor,selected:S.selected,threshold:S.threshold,cooldown:S.cooldown,uw:S.uw,rw:S.rw,lastAction:S.lastAction,auto:S.auto,userDecay:S.userDecay,actions:S.actions,quietUntil:S.quietUntil,log:S.log,char:packed('char'),user:packed('user')};
+    if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{simulatedHours:S.t,selectedEmotion:S.selected,actor:S.actor,threshold:S.threshold,actions:S.actions,motives:motives(),recentEvents:S.log.slice(0,4)},privateContent}).catch(()=>{});
+  }
+  function restore(saved){const p=saved?.privateContent;if(p?.version!==2||!Array.isArray(p.char)||p.char.length!==names.length||!Array.isArray(p.user)||p.user.length!==names.length)return;for(const a of ['char','user'])for(let i=0;i<names.length;i++){const row=p[a][i];if(!Array.isArray(row)||row.length!==7||!row.every(Number.isFinite))return;}
+    for(const key of ['t','actor','selected','threshold','cooldown','uw','rw','lastAction','auto','userDecay','actions','quietUntil','log'])if(p[key]!==undefined)S[key]=p[key];
+    if(!['char','user'].includes(S.actor))S.actor='char';if(!names.includes(S.selected))S.selected='思念';
+    for(const a of ['char','user'])names.forEach((n,i)=>{const [v,b,h,g,r,d,end]=p[a][i];S[a][n]={v:clamp(v),b:clamp(b),h:Math.max(.25,h),g,r,d:Math.max(-5,Math.min(5,Math.round(d))),end};});history=[];snapshot();}
+  $('apply').onclick=()=>applyScene($('scene').value);$('step').onclick=()=>step(.25);$('hour').onclick=()=>step(1);$('day').onclick=()=>step(24);
+  $('userdecay').onchange=()=>{S.userDecay=$('userdecay').checked;log('User 数值随时间变化：'+S.userDecay);render();save();};
+  $('actor').onchange=()=>{S.actor=$('actor').value;render();save();};$('auto').onchange=()=>{S.auto=$('auto').checked;render();save();};
+  for(const [id,key]of [['threshold','threshold'],['cooldown','cooldown'],['userweight','uw'],['retreatweight','rw']])$(id).onchange=()=>{const el=$(id);if(!el.validity.valid||!Number.isFinite(el.valueAsNumber))return;S[key]=el.valueAsNumber;log('参数 '+id+' → '+S[key]);render();save();};
+  for(const [id,key]of [['value','v'],['degree','d'],['base','b'],['drift','r'],['gain','g'],['recovery','h'],['duration','end']])$(id).onchange=()=>{const el=$(id);if(!el.validity.valid||!Number.isFinite(el.valueAsNumber))return;const x=S[S.actor][S.selected];x[key]=id==='duration'?S.t+el.valueAsNumber:el.valueAsNumber;if(id==='degree'&&x.end<=S.t)x.end=S.t+2;log(`${S.actor==='char'?'Character':'User'} ${S.selected} ${id} → ${el.valueAsNumber}`);snapshot();render();save();};
+  $('reset').onclick=()=>{S={version:2,t:0,char:initial('char'),user:initial('user'),actor:'char',selected:'思念',threshold:60,cooldown:2,uw:1,rw:1,lastAction:-1000,auto:true,userDecay:false,actions:0,quietUntil:0,log:[]};history=[];snapshot();render();save();};
+  const equations=[['靠近 / 陪聊','+.45 思念 +.25 依恋 +.20 陪伴欲 +.15 爱意 +.10 亲昵欲；−退缩合力 −.30 疏离'],['安抚 / 关心','User 倍数 × (.40 生气 +.45 悲伤 +.30 焦虑 +.20 委屈) +.35 担忧 +.15 爱意；−退缩合力 −.15 防备'],['修复 / 道歉','+.50 悔恨 +.35 内疚 +.20 爱意 +.15 User 倍数 × User 受伤；−退缩倍数 × (.40 生气 +.30 防备 +.20 委屈)'],['分享 / 探索','+.35 喜悦 +.30 兴奋 +.25 倾诉欲 +.20 探索欲 +.15 好奇；−退缩倍数 × (.30 疲惫 +.30 退缩 +.20 悲伤)'],['退缩合力','Character 退缩倍数 × (.25 悲伤 +.30 退缩 +.20 生气 +.15 疲惫)'],['情绪更新','每小时变化 = 常规变化 + 每级推动 × 程度 + 3 / 回归时长 × (常态 − 当前强度)；使用指数解，限制在 0–100'],['常态恢复','0 程度、0 常规变化时，在指定回归时长内消除约 95% 偏离；常规变化不为 0 时平衡点会偏移'],['模拟联系','最强动机 ≥ 阈值且冷却、安静期结束 → 模拟一次唤醒；并不意味着真实 LLM 必须发消息']];
+  for(const [name,text]of equations){const tr=document.createElement('tr');for(const value of [name,text]){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('formulas').append(tr);}
+  restore(window.openai?.widgetState);if(!history.length)snapshot();buildQuestionnaire();render();new ResizeObserver(()=>{draw();drawRadars();}).observe($('chart'));
+  window.addEventListener('openai:set_globals',event=>{if(event.detail?.globals?.widgetState){restore(event.detail.globals.widgetState);render();}});
+  window.emotionLabTest={step,motives,applyScene,getState:()=>S,getDefinitions:()=>defs,getGroups:()=>groups,applyQuestionnaire};
+})();
+</script>

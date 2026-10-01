@@ -77,7 +77,11 @@ def _initialize(db):
             usage TEXT, extra_usage TEXT);
         CREATE INDEX IF NOT EXISTS requests_conversation ON requests(conversation_id,status);
         CREATE TABLE IF NOT EXISTS regenerations(request_id TEXT PRIMARY KEY REFERENCES requests(id), message_id TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS resends(request_id TEXT PRIMARY KEY REFERENCES requests(id), message_id TEXT NOT NULL, content TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, document TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS companion_states(
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            character_id TEXT NOT NULL REFERENCES characters(id), document TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS conversation_branches(
             conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
             parent_conversation_id TEXT NOT NULL REFERENCES conversations(id), branch_message_id TEXT NOT NULL);
@@ -194,6 +198,26 @@ def _insert_message(db, cid, message):
                (message.id, cid, message.request_id, message.role, message.model_dump_json()))
 
 
+def edit_user_message(cid, mid, content):
+    """只修改用户正文，保留附件、时间和后续回复，不调用模型。"""
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        conversation = _conversation(db, cid)
+        if conversation.pending_request_id:
+            raise Conflict("请等待当前回复完成后编辑")
+        target = next((m for m in conversation.messages if m.id == mid), None)
+        if target is None:
+            raise KeyError("消息不存在")
+        if target.role != "user":
+            raise ValueError("仅支持编辑用户正文")
+        if not content.strip() and not target.images:
+            raise ValueError("消息不能为空")
+        edited = target.model_copy(update={"content": content})
+        db.execute("UPDATE messages SET document=? WHERE id=? AND conversation_id=?", (edited.model_dump_json(), mid, cid))
+        db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (utcnow().isoformat(), cid))
+        return edited
+
+
 def branch_conversation(cid, mid, action="branch", content=None):
     """复制消息前缀，原会话保持不变；编辑/重生成始终产生新分支。"""
     with database() as db:
@@ -261,9 +285,9 @@ def get_request(rid):
         return data
 
 
-def begin_turn(cid, rid, text, tz, source, search_mode, guard=None, regenerate_mid=None, images=None):
+def begin_turn(cid, rid, text, tz, source, search_mode, guard=None, regenerate_mid=None, images=None, resend_mid=None):
     valid_timezone(tz)
-    fingerprint = hashlib.sha256(dumps([cid, text, tz, source, search_mode] + ([regenerate_mid] if regenerate_mid else []) + ([images] if images else [])).encode()).hexdigest()
+    fingerprint = hashlib.sha256(dumps([cid, text, tz, source, search_mode] + ([regenerate_mid] if regenerate_mid else []) + ([images] if images else []) + (['resend', resend_mid] if resend_mid else [])).encode()).hexdigest()
     now = utcnow()
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -290,7 +314,17 @@ def begin_turn(cid, rid, text, tz, source, search_mode, guard=None, regenerate_m
             db.execute("INSERT INTO requests(id,conversation_id,fingerprint,source,status,started_at) VALUES (?,?,?,?,'running',?)",
                        (rid, cid, fingerprint, source, now.isoformat()))
         db.execute("UPDATE conversations SET timezone=?,updated_at=? WHERE id=?", (tz, now.isoformat(), cid))
-        if regenerate_mid:
+        if resend_mid:
+            index = next((i for i,m in enumerate(conversation.messages) if m.id == resend_mid and m.role == 'user'), -1)
+            if index < 0:
+                raise ValueError('只能原地重新发送用户消息')
+            following = conversation.messages[index+1:]
+            if following:
+                if following[0].role != 'assistant' or following[0].source == 'heartbeat':
+                    raise ValueError('这条消息没有可原地替换的回复，请使用新分支')
+                db.execute('INSERT OR REPLACE INTO regenerations VALUES (?,?)', (rid, following[0].id))
+            db.execute('INSERT OR REPLACE INTO resends VALUES (?,?,?)', (rid, resend_mid, text))
+        elif regenerate_mid:
             target = next((m for m in conversation.messages if m.id == regenerate_mid), None)
             if not target or target.role != "assistant" or target.source == "heartbeat":
                 raise ValueError("该消息不支持重新生成")
@@ -304,12 +338,31 @@ def begin_turn(cid, rid, text, tz, source, search_mode, guard=None, regenerate_m
 
 
 def finish_turn(rid, content, usage, extra_usage, sources, result, attempt_started_at=None):
+    from . import role_state
+    emotion_config = role_state.config()
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         if not row or row["status"] != "running" or (attempt_started_at and row["started_at"] != attempt_started_at):
             raise Conflict("请求已结束，拒绝写入迟到结果")
         conversation = _conversation(db, row["conversation_id"])
+        resend = db.execute('SELECT message_id,content FROM resends WHERE request_id=?', (rid,)).fetchone()
+        if resend:
+            if not content:
+                raise ValueError('原地重新发送未返回正文，原消息保留')
+            original = next(m for m in conversation.messages if m.id == resend['message_id'])
+            edited = original.model_copy(update={'content':resend['content']})
+            db.execute('UPDATE messages SET document=? WHERE id=? AND conversation_id=?', (edited.model_dump_json(), edited.id, conversation.id))
+        result = dict(result)
+        result['emotion_change'] = {'status':'disabled','changes':[]}
+        if emotion_config.enabled:
+            previous = role_state.calculate(db, conversation, utcnow(), emotion_config)
+            updated = role_state.apply(db, conversation, result.get('emotion_updates', []), row['source'], emotion_config, result.get('emotion_revision'))
+            stale = result.get('emotion_revision') is not None and previous['revision'] != result['emotion_revision']
+            changes = [{'emotion':item['emotion'], 'before':previous['values'][item['emotion']], 'after':updated['values'][item['emotion']]}
+                       for item in result.get('emotion_updates', []) if not stale and previous['values'][item['emotion']] != updated['values'][item['emotion']]]
+            result['emotion_change'] = {'status':'invalid' if result.get('emotion_warning') else 'stale' if stale else 'changed' if changes else 'unchanged','changes':changes}
+            if result.get('emotion_warning'):role_state.log(db,conversation.id,{'source':row['source'],'status':'invalid','warning':result['emotion_warning']})
         message = None
         if content:
             message = new_message("assistant", content, conversation.timezone, row["source"], rid, usage, sources)
@@ -322,16 +375,32 @@ def finish_turn(rid, content, usage, extra_usage, sources, result, attempt_start
             else:
                 _insert_message(db, conversation.id, message)
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (utcnow().isoformat(), conversation.id))
+        if message and row['source'] == 'heartbeat':
+            state_row = db.execute('SELECT document FROM companion_states WHERE conversation_id=?', (conversation.id,)).fetchone()
+            if state_row:
+                state = json.loads(state_row[0])
+                state.update(released_at=utcnow().isoformat(), longing=10, desire_to_act=0)
+                db.execute('UPDATE companion_states SET document=? WHERE conversation_id=?', (dumps(state), conversation.id))
+        from . import chat_skills
+        skill_actions = result.pop('_skill_actions', [])
+        skill_sources = result.pop('_skill_source_ids', [])
+        skill_sources += [m.id for m in conversation.messages if m.request_id == rid]
+        if message: skill_sources.append(message.id)
+        regenerated = bool(db.execute('SELECT 1 FROM regenerations WHERE request_id=?', (rid,)).fetchone() or resend)
+        result['skill_results'] = chat_skills.commit(db, conversation, rid, skill_actions, list(dict.fromkeys(skill_sources)), regenerated) if skill_actions else []
         result = {**result, "assistant_message": message.model_dump() if message else None}
         db.execute("UPDATE requests SET status='complete',finished_at=?,result=?,usage=?,extra_usage=? WHERE id=?",
                    (utcnow().isoformat(), dumps(result), usage.model_dump_json(), dumps(extra_usage), rid))
         return result
 
 
-def fail_turn(rid, error, usage=None, extra_usage=None, attempt_started_at=None):
+def fail_turn(rid, error, usage=None, extra_usage=None, attempt_started_at=None, result=None):
     with database() as db:
         db.execute("UPDATE requests SET status='error',finished_at=?,error=?,usage=?,extra_usage=? WHERE id=? AND status='running' AND (? IS NULL OR started_at=?)",
                    (utcnow().isoformat(), error, usage.model_dump_json() if usage else None, dumps(extra_usage or []), rid, attempt_started_at, attempt_started_at))
+        if result is not None:
+            db.execute("UPDATE requests SET result=? WHERE id=? AND status='error' AND (? IS NULL OR started_at=?)",
+                       (dumps(result), rid, attempt_started_at, attempt_started_at))
 
 
 def get_setting(key, default):
@@ -376,6 +445,18 @@ def heartbeat_logs(cid, limit=30):
             (cid, limit))]
 
 
+def companion_state(cid, now=None):
+    from .state_machine import calculate
+    with database() as db:
+        db.execute('BEGIN IMMEDIATE')
+        conversation = _conversation(db, cid)
+        row = db.execute('SELECT document FROM companion_states WHERE conversation_id=?', (cid,)).fetchone()
+        state = calculate(conversation, json.loads(row[0]) if row else None, now)
+        db.execute('INSERT INTO companion_states VALUES (?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET document=excluded.document',
+                   (cid, conversation.character_id, dumps(state)))
+        return state
+
+
 def recover_interrupted():
     # 仅回收过期请求，支持多个服务器 worker；正常任务不被其他进程启动误杀。
     with database() as db:
@@ -390,7 +471,10 @@ def delete_conversation(cid):
         _conversation(db, cid)
         if db.execute("SELECT 1 FROM requests WHERE conversation_id=? AND status='running'", (cid,)).fetchone():
             raise Conflict("会话正在生成，请完成后删除")
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activity_runs'").fetchone() and db.execute("SELECT 1 FROM activity_runs WHERE conversation_id=? AND status='running' AND started_at>?", (cid, (utcnow() - timedelta(minutes=5)).isoformat())).fetchone():
+            raise Conflict('会话正在外出，请完成后删除')
         db.execute("DELETE FROM conversation_branches WHERE conversation_id=? OR parent_conversation_id=?", (cid, cid))
+        db.execute("DELETE FROM resends WHERE request_id IN (SELECT id FROM requests WHERE conversation_id=?)", (cid,))
         db.execute("DELETE FROM regenerations WHERE request_id IN (SELECT id FROM requests WHERE conversation_id=?)", (cid,))
         db.execute("DELETE FROM messages WHERE conversation_id=?", (cid,))
         db.execute("DELETE FROM requests WHERE conversation_id=?", (cid,))

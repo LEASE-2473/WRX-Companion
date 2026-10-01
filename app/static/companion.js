@@ -222,7 +222,7 @@ function editCharacter(character) {
   Object.entries(fields).forEach(([id, key]) => $(id).value = character[key] || '');
   characterOptions($('characterPreset'), settings.prompt_presets.presets, character.preset_id, '跟随当前预设');
   characterOptions($('characterLorebook'), settings.lorebooks.lorebooks, character.lorebook_id, '跟随当前世界书');
-  characterOptions($('characterLlm'), settings.provider_profiles.llm_profiles, character.llm_profile_id, '跟随当前 LLM');
+  characterOptions($('characterLlm'), settings.provider_profiles.llm_profiles.filter(p => (p.purpose || 'chat') === 'chat'), character.llm_profile_id, '跟随当前 LLM');
   characterOptions($('characterTts'), settings.provider_profiles.tts_profiles, character.tts_profile_id, '跟随当前 TTS');
   $('characterState').textContent = character.id ? '正在编辑当前角色' : '新角色尚未保存';
 }
@@ -271,9 +271,20 @@ async function loadHeartbeatLogs() {
   const rows = await companionApi(`/api/conversations/${activeConversationId}/heartbeat/logs`); $('heartbeatLogs').replaceChildren();
   if (!rows.length) $('heartbeatLogs').textContent = '尚无模型检查记录（冷却、静默等跳过检查不会调用模型）';
   rows.forEach(row => {
-    const item = document.createElement('div'); item.className = 'heartbeat-log';
+    const item = document.createElement('details'); item.className = 'heartbeat-log';
     const result = row.result ? JSON.parse(row.result) : {};
-    item.textContent = `${new Date(row.started_at).toLocaleString()} · ${result.action || row.status}${row.error ? ' · ' + row.error : ''}${row.usage ? ' · ' + usageLabel(JSON.parse(row.usage)) : ''}`;
+    const debug = result.debug || {};
+    const state = debug.prompt_trace?.companion_state;
+    const summary = document.createElement('summary');
+    const action = {NO_ACTION: '保持安静', SEND_MESSAGE: '已主动联系', EXPLORE: '选择自主外出（结果见自主外出记录）'}[result.action] || row.status;
+    summary.textContent = `${new Date(row.started_at).toLocaleString()} · ${action}${row.error ? ' · ' + row.error : ''}${row.usage ? ' · ' + usageLabel(JSON.parse(row.usage)) : ''} · ${result.latency_seconds ?? (row.finished_at ? ((new Date(row.finished_at) - new Date(row.started_at)) / 1000).toFixed(2) : '—')} 秒`;
+    item.append(summary);
+    const reason = document.createElement('p'); reason.textContent = state ? state.decision_mode === 'model' ? '由模型结合当前情绪、关系、聊天与时间自主判断（无触发阈值）' : `${state.reason}；旧版行动值 ${state.desire_to_act} / 阈值 ${state.threshold}` : '旧记录未保存状态快照'; item.append(reason);
+    for (const [title, value] of [['发送给模型的完整消息', debug.llm_messages], ['模型原始返回', debug.llm_raw], ['上下文编译与状态', debug.prompt_trace]]) {
+      const heading = document.createElement('strong'); heading.textContent = title;
+      const pre = document.createElement('pre'); pre.textContent = value == null ? '此记录无数据' : typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      item.append(heading, pre);
+    }
     $('heartbeatLogs').append(item);
   });
 }

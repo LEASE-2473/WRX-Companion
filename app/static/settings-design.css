@@ -1,0 +1,50 @@
+/* 与角色记忆统一的设置面板样式，仅作用于管理弹窗。 */
+.manager-dialog:not(#roleMemoryPanel),.llm-debug-dialog{--ink:#34432f;--muted:#85907c;--line:#e1e7da;--accent:#6f845f;--accent-2:#829774;--soft:#f0f4e9;background:#f7f9f3;color:var(--ink);border:1px solid #e2e8dc;border-radius:22px;box-shadow:0 24px 100px #25301e30}
+.manager-dialog:not(#roleMemoryPanel)::backdrop,.llm-debug-dialog::backdrop{background:#242b284f;backdrop-filter:blur(5px)}
+.manager-dialog:not(#roleMemoryPanel) .dialog-header,.llm-debug-dialog .dialog-header{background:#fcfdf9;padding:24px 28px 20px;border-bottom:1px solid var(--line);gap:20px;flex-shrink:0}
+.manager-dialog:not(#roleMemoryPanel) .dialog-header h2,.llm-debug-dialog .dialog-header h2{font-size:23px;font-weight:600;letter-spacing:0;color:var(--ink)}
+.manager-dialog:not(#roleMemoryPanel) .dialog-header>h2::before{display:block;font-size:10px;font-weight:400;letter-spacing:1.6px;color:#8e9985;margin-bottom:7px}
+#characterPanel .dialog-header>h2::before{content:"让每个角色都有自己的模样"}#searchPanel .dialog-header>h2::before{content:"连接外面的世界"}#heartbeatPanel .dialog-header>h2::before{content:"让联系发生得更自然"}#providerPanel .dialog-header>h2::before{content:"选择她的思考方式与声音"}#contextPanel .dialog-header>h2::before{content:"留住对话，调整每轮的回忆"}#voicePanel .dialog-header>h2::before{content:"听见彼此"}#messageVoicePanel .dialog-header>h2::before{content:"为这条回复选择声音"}#messageEditPanel .dialog-header>h2::before{content:"从这里续写另一种可能"}
+.manager-dialog:not(#roleMemoryPanel) .section-kicker{font-size:10px;font-weight:400;letter-spacing:1.5px;color:#8e9985;margin-bottom:7px}
+.manager-dialog:not(#roleMemoryPanel) .dialog-scroll{padding:24px 28px 30px;gap:18px;scrollbar-width:thin;scrollbar-color:#c4cfb8 #f7f9f3}
+.manager-dialog:not(#roleMemoryPanel) .dialog-scroll::-webkit-scrollbar-thumb{background:#c4cfb8;border:3px solid #f7f9f3}.manager-dialog:not(#roleMemoryPanel) .dialog-scroll::-webkit-scrollbar-track{background:#f7f9f3}
+.manager-dialog:not(#roleMemoryPanel) label{color:#74816a;font-size:12px;font-weight:400;gap:8px;min-width:0}
+.manager-dialog:not(#roleMemoryPanel) input,.manager-dialog:not(#roleMemoryPanel) select,.manager-dialog:not(#roleMemoryPanel) textarea{min-width:0;max-width:100%;width:100%;background:#fcfdf9;border:1px solid #dde5d4;border-radius:9px;padding:10px 12px;font-size:13px;color:#43513d;box-shadow:none}
+.manager-dialog:not(#roleMemoryPanel) textarea{line-height:1.75;min-height:100px}
+.manager-dialog:not(#roleMemoryPanel) input:focus,.manager-dialog:not(#roleMemoryPanel) select:focus,.manager-dialog:not(#roleMemoryPanel) textarea:focus{border-color:#91a783;box-shadow:0 0 0 3px #91a78318;background:#fff}
+.manager-dialog:not(#roleMemoryPanel) button,.llm-debug-dialog button{border:1px solid #dde5d4;background:#fff;color:#687d5e;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:500;box-shadow:none;transform:none}
+.manager-dialog:not(#roleMemoryPanel) button:hover:not(:disabled),.llm-debug-dialog button:hover:not(:disabled){background:#edf2e6;border-color:#bccbad;box-shadow:none;transform:none}
+.manager-dialog:not(#roleMemoryPanel) button.primary-button,.manager-dialog:not(#roleMemoryPanel) button.talk{background:#6e835f;border-color:#6e835f;color:#fff}
+.manager-dialog:not(#roleMemoryPanel) button.primary-button:hover:not(:disabled){background:#5b714e}
+.manager-dialog:not(#roleMemoryPanel) button.danger-button{color:#af7471;background:#fff;border-color:#eadcda}
+.manager-dialog:not(#roleMemoryPanel) .dialog-header>button,.llm-debug-dialog .dialog-header>button{border-radius:30px;background:transparent;color:#86917e;padding:8px 16px}
+.manager-dialog:not(#roleMemoryPanel) .hint{font-size:12px;color:var(--muted);line-height:1.8;margin:0;overflow-wrap:anywhere}
+.manager-dialog:not(#roleMemoryPanel) .hint.saved{color:#648553}.manager-dialog:not(#roleMemoryPanel) .hint.dirty{color:#aa8557}
+.manager-dialog:not(#roleMemoryPanel) .manager-primary{gap:18px;align-items:start}
+.manager-dialog:not(#roleMemoryPanel) .button-row{gap:8px}
+.manager-dialog:not(#roleMemoryPanel) .dialog-scroll>.button-row{padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.manager-dialog:not(#roleMemoryPanel) .inline-check{display:flex;align-items:center;gap:10px;line-height:1.6}
+.manager-dialog:not(#roleMemoryPanel) input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:32px;height:19px;flex-shrink:0;border:0;border-radius:20px;padding:0;background:#dce3d5;position:relative;margin:0;cursor:pointer;vertical-align:middle}
+.manager-dialog:not(#roleMemoryPanel) input[type="checkbox"]::after{content:"";position:absolute;width:13px;height:13px;left:3px;top:3px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0001;transition:transform .15s}
+.manager-dialog:not(#roleMemoryPanel) input[type="checkbox"]:checked{background:#7b936c}.manager-dialog:not(#roleMemoryPanel) input[type="checkbox"]:checked::after{transform:translateX(13px)}
+.manager-dialog:not(#roleMemoryPanel) input[type="range"]{accent-color:#7b936c}
+.manager-dialog:not(#roleMemoryPanel) .prompt-toolbar,.manager-dialog:not(#roleMemoryPanel) .provider-info,.manager-dialog:not(#roleMemoryPanel) .vector-import-bar,.manager-dialog:not(#roleMemoryPanel) .vector-master-switch,.manager-dialog:not(#roleMemoryPanel) .vector-save-row{background:#edf2e6;border-color:#dce5d3;border-radius:12px;padding:16px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-toolbar label{min-width:180px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry,.manager-dialog:not(#roleMemoryPanel) .provider-group,.manager-dialog:not(#roleMemoryPanel) .vector-library-card,.manager-dialog:not(#roleMemoryPanel) .vector-chunk-card,.manager-dialog:not(#roleMemoryPanel) .heartbeat-log{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:none}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry-list,.manager-dialog:not(#roleMemoryPanel) .vector-library-list,.manager-dialog:not(#roleMemoryPanel) .heartbeat-log-list{gap:12px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry>summary,.manager-dialog:not(#roleMemoryPanel) .provider-group>summary,.manager-dialog:not(#roleMemoryPanel) .vector-chunk-card>summary{padding:16px 18px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry[open]>summary,.manager-dialog:not(#roleMemoryPanel) .provider-group[open]>summary,.manager-dialog:not(#roleMemoryPanel) .vector-chunk-card[open]>summary{background:#f5f8ef;border-color:#e3e9dc}
+.manager-dialog:not(#roleMemoryPanel) .provider-group .details-body{padding:20px;gap:18px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry-grid{gap:14px;padding:6px}
+.manager-dialog:not(#roleMemoryPanel) .prompt-entry>.prompt-entry-grid,.manager-dialog:not(#roleMemoryPanel) .prompt-entry>label,.manager-dialog:not(#roleMemoryPanel) .prompt-entry>p,.manager-dialog:not(#roleMemoryPanel) .prompt-entry>.final-outlet{margin:16px 18px}
+.manager-dialog:not(#roleMemoryPanel) .token-badge,.manager-dialog:not(#roleMemoryPanel) .final-outlet,.manager-dialog:not(#roleMemoryPanel) .status-pill{background:#edf2e5;color:#728463}
+.manager-dialog:not(#roleMemoryPanel) .drag-handle{padding:4px 7px;background:#f7f9f3;border:0;color:#a0ae93}
+.manager-dialog:not(#roleMemoryPanel) pre,.llm-debug-dialog pre,.manager-dialog:not(#roleMemoryPanel) .vector-chunk-body pre{background:#f5f8ef;border-color:#e0e7d7;border-radius:9px;color:#66765b;font:12px/1.8 Consolas,monospace}
+.manager-dialog:not(#roleMemoryPanel) summary:focus-visible,.manager-dialog:not(#roleMemoryPanel) button:focus-visible{outline:2px solid #839e72;outline-offset:3px}
+#characterPanel .dialog-scroll>.manager-primary,#characterPanel .dialog-scroll>label,#contextSettingsPanel{background:#fff;border:1px solid #e1e7da;padding:20px;border-radius:14px}
+#contextSettingsPanel{display:grid;gap:18px}#contextSettingsPanel>button{justify-self:start}
+#searchPanel .dialog-scroll{grid-template-columns:repeat(2,minmax(0,1fr))}#searchPanel .dialog-scroll>label.inline-check,#searchPanel .dialog-scroll>.manager-primary,#searchPanel .dialog-scroll>details,#searchPanel .dialog-scroll>.hint,#searchPanel .dialog-scroll>.button-row{grid-column:1/-1}
+#searchPanel .dialog-scroll>details{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}#searchPanel .dialog-scroll>details>summary{padding:16px 20px;color:#6c805e;font-size:13px}#searchPanel .details-body{gap:16px;padding:20px}
+#heartbeatPanel .dialog-scroll>.manager-primary{background:#fff;border:1px solid var(--line);padding:22px;border-radius:14px}#heartbeatPanel .dialog-scroll>.inline-check{padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:#edf2e6}
+#heartbeatPanel .heartbeat-log{padding:17px 20px}#heartbeatPanel .heartbeat-log summary{color:#6c805e;line-height:1.7}
+@media(max-width:760px){.manager-dialog:not(#roleMemoryPanel){width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0}.manager-dialog:not(#roleMemoryPanel) .dialog-header{padding:20px}.manager-dialog:not(#roleMemoryPanel) .dialog-scroll{padding:18px;gap:16px}.manager-dialog:not(#roleMemoryPanel) input,.manager-dialog:not(#roleMemoryPanel) textarea,.manager-dialog:not(#roleMemoryPanel) select{font-size:16px}.manager-dialog:not(#roleMemoryPanel) .manager-primary,#searchPanel .dialog-scroll{grid-template-columns:1fr}.manager-dialog:not(#roleMemoryPanel) .prompt-toolbar label{min-width:0}.manager-dialog:not(#roleMemoryPanel) .prompt-toolbar{gap:12px}.manager-dialog:not(#roleMemoryPanel) .provider-group .details-body{padding:16px}.manager-dialog:not(#roleMemoryPanel) .prompt-entry-head{gap:8px}.manager-dialog:not(#roleMemoryPanel) .dialog-header h2{font-size:21px}.manager-dialog:not(#roleMemoryPanel) .prompt-entry-grid{grid-template-columns:1fr}.manager-dialog:not(#roleMemoryPanel) .prompt-entry-head .token-badge{margin-left:0}}

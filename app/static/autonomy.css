@@ -1,0 +1,30 @@
+#autonomyPanel{width:min(880px,94vw);max-height:92dvh;padding:0;font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px;line-height:1.7;overflow:hidden}
+#autonomyPanel[open]{display:flex;flex-direction:column}
+#autonomyPanel .dialog-scroll{overflow:auto;min-height:0}
+#autonomyPanel .dialog-header h2{font-family:inherit;margin:4px 0 0;line-height:1.4}
+#autonomyPanel .activity-body{display:flex;flex-direction:column;gap:18px;min-width:0}
+#autonomyPanel p{font-family:inherit;font-size:13px;line-height:1.8;margin:0;color:#7b8772;overflow-wrap:anywhere}
+#autonomyPanel [role=status]{min-height:22px;margin-bottom:10px}
+#autonomyPanel .outing-section{padding:22px;border:1px solid #e1e7da;border-radius:16px;background:#fff;display:flex;flex-direction:column;gap:16px;min-width:0}
+#autonomyPanel h3,#autonomyPanel h4{font-family:inherit;font-size:16px;font-weight:600;letter-spacing:0;line-height:1.5;margin:0;color:#42523a}
+#autonomyPanel h4{font-size:14px}
+#autonomyPanel .outing-hero{background:linear-gradient(120deg,#e8edde,#f2f5eb)}
+#autonomyPanel .outing-hero>button{align-self:flex-start;padding:12px 22px;font-size:14px}
+#autonomyPanel label.outing-field{display:flex;flex-direction:column;gap:7px;font-family:inherit;font-size:13px;line-height:1.6}
+#autonomyPanel label.outing-check{display:flex;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:10px;font-size:13px;line-height:1.7}
+#autonomyPanel input,#autonomyPanel textarea,#autonomyPanel select,#autonomyPanel button{font-family:inherit;font-size:14px;line-height:1.6;letter-spacing:0}
+#autonomyPanel label.outing-check>input{width:16px;height:16px;flex:0 0 16px;accent-color:#718763;margin:0;padding:0}
+#autonomyPanel input,#autonomyPanel select,#autonomyPanel textarea{box-sizing:border-box;min-width:0}
+#autonomyPanel textarea{resize:vertical}
+#autonomyPanel .outing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+#autonomyPanel .outing-actions{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+#autonomyPanel .outing-actions label{flex:1}
+#autonomyPanel .outing-details{display:flex;flex-direction:column;gap:14px;padding:16px 0 4px;min-width:0}
+#autonomyPanel summary{cursor:pointer;font-size:14px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}
+#autonomyPanel details{min-width:0}
+#autonomyPanel pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:12px;line-height:1.8;margin:0;background:#f6f8f2;padding:14px;border-radius:10px;max-height:420px;overflow:auto}
+#autonomyPanel .outing-destination{display:flex;flex-direction:column;gap:14px;border:1px solid #e3e8de;border-radius:12px;padding:18px;min-width:0}
+#autonomyPanel a{color:#5c784e;margin-left:8px}
+#autonomyPanel button:focus-visible,#autonomyPanel summary:focus-visible{outline:2px solid #859f75;outline-offset:3px}
+@media(max-width:760px){#autonomyPanel{width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0}#autonomyPanel .dialog-header{padding:20px}#autonomyPanel .dialog-scroll{padding:18px}#autonomyPanel .outing-section{padding:18px}#autonomyPanel input,#autonomyPanel select,#autonomyPanel textarea{font-size:16px}}
+@media(max-width:420px){#autonomyPanel .outing-grid{grid-template-columns:1fr}}

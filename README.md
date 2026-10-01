@@ -38,6 +38,8 @@ node tests/provider_ui_test.cjs
 node tests/reply_format_test.cjs
 ```
 
-测试使用离线模拟供应商，不代表真实 LLM / 搜索 / TTS 联调已完成。界面和功能说明见 [使用指南](docs/COMPANION_GUIDE.md)，当前状态见 [项目上下文](PROJECT_CONTEXT.md)。
+测试使用离线模拟供应商，不代表真实 LLM / 搜索 / TTS 联调已完成。界面和功能说明见 [使用指南](docs/COMPANION_GUIDE.md)。
 
-服务目前没有鉴权，启动默认仅监听本机；公网部署需要另行配置鉴权、HTTPS 和访问控制。手机系统通知与总结 / 向量记忆尚未实现。
+服务目前没有鉴权，启动默认仅监听本机；公网部署需要另行配置鉴权、HTTPS 和访问控制。已支持角色日记、事件与冷热记忆；手机系统通知尚未实现，自主外出功能当前停用。
+
+本地开发的项目上下文、变更记录、规划、讨论及审计文档不随公开版本发布。应用技能与数据库说明分别见 [技能说明](SKILLS.md) 和 [数据库字段](DATABASE_FIELDS.md)。

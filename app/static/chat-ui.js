@@ -1,4 +1,18 @@
 // 2.0 文字主界面；复用 WRX 的配置编辑器与语音适配器。
+let activeTextRequest = null;
+$('stopText').addEventListener('click', async () => {
+  const turn = activeTextRequest;
+  if (!turn) return;
+  $('stopText').disabled = true;
+  $('textInputState').textContent = '正在停止…';
+  try {
+    await companionApi(`/api/conversations/${encodeURIComponent(turn.cid)}/requests/${encodeURIComponent(turn.request_id)}/cancel`, {}, 'POST');
+  } catch (error) {
+    $('textInputState').textContent = `停止失败：${error.message}；可再次点击停止`;
+  } finally {
+    $('stopText').disabled = false;
+  }
+});
 let editingMessage = null;
 let speakingMessage = null;
 let speechObjectUrl = null;
@@ -77,6 +91,7 @@ function renderConversationSelect() {
     });
     row.append(button, remove); $('conversationList').append(row);
   });
+  void refreshCompanionState();
   const conversation = currentConversation();
   $('chatTitle').textContent = currentCharacter()?.name || '温柔乡';
   $('chatSubtitle').replaceChildren();
@@ -162,25 +177,64 @@ function chatMessageNode(role, content, message = {}) {
   const menu = document.createElement('details'); menu.className = 'message-menu';
   const summary = document.createElement('summary'); summary.textContent = '更多 ···';
   const options = document.createElement('div'); options.className = 'message-menu-options';
+  if (role === 'user') {
+    const beginEdit = async (regenerate) => {
+      if (processing || recording) throw new Error('请等待当前一轮完成');
+      if (document.querySelector('.message-inline-editor')) throw new Error('请先保存或取消正在编辑的消息');
+      const cid = activeConversationId;
+      const body = node.querySelector('.message-body');
+      const editor = document.createElement('textarea'); editor.className = 'message-inline-editor';
+      editor.value = message.content; editor.setAttribute('aria-label', '编辑用户消息正文');
+      body.replaceChildren(editor);
+      if (message.images?.length) { const gallery = document.createElement('div'); gallery.className = 'message-images'; renderImages(gallery, message.images); body.append(gallery); }
+      const resize = () => { editor.style.height = 'auto'; editor.style.height = `${editor.scrollHeight + 2}px`; };
+      editor.oninput = resize;
+      const controls = document.createElement('div'); controls.className = 'message-edit-controls';
+      const restore = () => { renderMessageText(body, message.content); if (message.images?.length) { const gallery = document.createElement('div'); gallery.className = 'message-images'; renderImages(gallery, message.images); body.append(gallery); } actions.append(state); controls.remove(); actions.hidden = false; };
+      const save = operation(regenerate ? '保存并重新生成' : '保存', async () => {
+        if (cid !== activeConversationId || processing || recording) throw new Error('当前对话已变化或正在生成');
+        const content = editor.value;
+        if (!content.trim() && !message.images?.length) throw new Error('消息不能为空');
+        save.disabled = true; cancel.disabled = true; editor.disabled = true;
+        try {
+          if (regenerate) {
+            await sendTypedText({content, images: message.images || [], resend_mid: message.id});
+            if (document.contains(editor)) { editor.disabled = false; save.disabled = false; cancel.disabled = false; }
+          } else {
+            const updated = await companionApi(`/api/conversations/${encodeURIComponent(cid)}/messages/${encodeURIComponent(message.id)}`, {content}, 'PATCH');
+            Object.assign(message, updated); pendingTextTurn = null; restore(); state.textContent = '已保存';
+          }
+        } catch (error) { editor.disabled = false; save.disabled = false; cancel.disabled = false; throw error; }
+      });
+      const cancel = operation('取消', async () => restore());
+      controls.append(save, cancel, state); node.append(controls); actions.hidden = true;
+      editor.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); restore(); } };
+      editor.focus(); resize();
+    };
+    actions.append(operation('✎ 编辑', () => beginEdit(false)), operation('✎↻ 编辑并重新生成', () => beginEdit(true)));
+  } else {
   options.append(operation(role === 'user' ? '编辑并重新发送' : '编辑回复', async () => {
     editingMessage = {message, cid: activeConversationId};
     $('messageEditTitle').textContent = role === 'user' ? '编辑并重新发送' : '编辑 AI 回复';
+    $('resendMessageEdit').hidden = role !== 'user';
     $('messageEditContent').value = message.content; $('messageEditState').textContent = '';
     $('messageEditPanel').showModal(); menu.open = false;
   }));
-  options.append(operation('从这里创建分支', () => createMessageBranch(message, 'branch')));
+  }
+  options.append(operation('⑂ 开分支', () => createMessageBranch(message, 'branch')));
   const index = messages.findIndex(m => m.id === message.id);
   if (role === 'assistant' && message.source !== 'heartbeat' && messages[index - 1]?.role === 'user') {
     actions.append(operation('重新生成', () => sendTypedText({content: messages[index - 1].content, regenerate_mid: message.id})));
     options.append(operation('重新生成到分支', () => createMessageBranch(message, 'regenerate')));
   }
-  options.append(operation('复制正文', async () => { await navigator.clipboard.writeText(role === 'assistant' ? splitReplyMessages(message.content).join('\n\n') : message.content); state.textContent = '已复制'; menu.open = false; }));
+  options.append(operation('⧉ 复制正文', async () => { await navigator.clipboard.writeText(role === 'assistant' ? splitReplyMessages(message.content).join('\n\n') : message.content); state.textContent = '已复制'; menu.open = false; }));
   menu.append(summary, options); actions.append(menu, state); node.append(actions);
   return node;
 }
 messageNode = chatMessageNode;
 
 function renderConversation() {
+  void refreshCompanionState(true);
   $('chat').replaceChildren();
   if (!messages.length) {
     const empty = document.createElement('div'); empty.className = 'chat-empty';
@@ -218,20 +272,21 @@ async function sendTypedText(override = null) {
   const content = override ? override.content : $('textInput').value.trim();
   const images = override ? (override.images || []) : [...draftImages]; if (!content && !images.length && !override?.regenerate_mid) return;
   const cid = activeConversationId; const mode = $('searchMode').value;
-  if (!pendingTextTurn || pendingTextTurn.cid !== cid || pendingTextTurn.content !== content || pendingTextTurn.search_mode !== mode || pendingTextTurn.regenerate_mid !== override?.regenerate_mid || JSON.stringify(pendingTextTurn.images || []) !== JSON.stringify(images)) {
-    pendingTextTurn = {cid, request_id: crypto.randomUUID(), content, images, timezone: localTimezone(), search_mode: mode, regenerate_mid: override?.regenerate_mid};
+  if (!pendingTextTurn || pendingTextTurn.cid !== cid || pendingTextTurn.content !== content || pendingTextTurn.search_mode !== mode || pendingTextTurn.regenerate_mid !== override?.regenerate_mid || pendingTextTurn.resend_mid !== override?.resend_mid || JSON.stringify(pendingTextTurn.images || []) !== JSON.stringify(images)) {
+    pendingTextTurn = {cid, request_id: crypto.randomUUID(), content, images, timezone: localTimezone(), search_mode: mode, regenerate_mid: override?.regenerate_mid, resend_mid: override?.resend_mid};
   }
   processing = true; stickToBottom = true;
+  activeTextRequest = {...pendingTextTurn}; $('stopText').hidden = false; $('stopText').disabled = false;
   setConversationControlsDisabled(true); setConfigurationControlsDisabled(true); setTextInputControlsDisabled(true);
   $('textInputState').textContent = '正在回复…';
   let assistantNode = null; let delta = ''; let completed = false;
   try {
-    const endpoint = override?.regenerate_mid ? `/api/conversations/${encodeURIComponent(cid)}/messages/${encodeURIComponent(override.regenerate_mid)}/regenerate` : `/api/conversations/${encodeURIComponent(cid)}/messages/stream`;
+    const endpoint = override?.resend_mid ? `/api/conversations/${encodeURIComponent(cid)}/messages/${encodeURIComponent(override.resend_mid)}/resend` : override?.regenerate_mid ? `/api/conversations/${encodeURIComponent(cid)}/messages/${encodeURIComponent(override.regenerate_mid)}/regenerate` : `/api/conversations/${encodeURIComponent(cid)}/messages/stream`;
     const response = await fetch(endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pendingTextTurn)});
     await consumeEvents(response, payload => {
       if (payload.type === 'state') status(payload.state);
       if (payload.type === 'search') renderSearchTurn(payload);
-      if (payload.type === 'transcript' && !override?.regenerate_mid) { const node = addMessage('user', payload.text); if (images.length) { const gallery = document.createElement('div'); gallery.className = 'message-images'; renderImages(gallery, images); node.querySelector('.message-body').append(gallery); } }
+      if (payload.type === 'transcript' && !override?.regenerate_mid && !override?.resend_mid) { const node = addMessage('user', payload.text); if (images.length) { const gallery = document.createElement('div'); gallery.className = 'message-images'; renderImages(gallery, images); node.querySelector('.message-body').append(gallery); } }
       if (payload.type === 'delta') {
         delta += payload.text;
         if (!assistantNode) assistantNode = addMessage('assistant', '');
@@ -248,9 +303,10 @@ async function sendTypedText(override = null) {
     if (!override) { $('textInput').value = ''; draftImages = []; renderDraftImages(); }
     pendingTextTurn = null; $('textInputState').textContent = 'Enter 发送 · Shift + Enter 换行'; status('Idle');
   } catch (error) {
-    if (override && !override.regenerate_mid && !$('textInput').value.trim()) { $('textInput').value = content; draftImages = [...images]; renderDraftImages(); }
-    $('textInputState').textContent = `${error.message}；再次发送相同内容会复用请求。`; status('Error');
+    if (override && !override.regenerate_mid && !override.resend_mid && !$('textInput').value.trim()) { $('textInput').value = content; draftImages = [...images]; renderDraftImages(); }
+    $('textInputState').textContent = error.message === '已手动停止生成' ? '已停止，可继续发送；再次发送相同内容会复用请求。' : `${error.message}；再次发送相同内容会复用请求。`; status(error.message === '已手动停止生成' ? 'Idle' : 'Error');
   } finally {
+    activeTextRequest = null; $('stopText').hidden = true;
     await persistConversation(cid, null, false).catch(() => {});
     processing = false; setConversationControlsDisabled(false); setConfigurationControlsDisabled(false); setTextInputControlsDisabled(false);
   }
@@ -289,6 +345,14 @@ async function playStoredMessage(message, profileId, state, cid = activeConversa
   finally { speechBusy = false; }
 }
 
+$('resendMessageEdit').onclick = reportTo('messageEditState', async () => {
+  if (!editingMessage || editingMessage.cid !== activeConversationId || processing || recording) return;
+  const {message} = editingMessage;
+  const content = $('messageEditContent').value;
+  if (!content.trim() && !message.images?.length) throw new Error('消息不能为空');
+  $('messageEditPanel').close();
+  await sendTypedText({content, images: message.images || [], resend_mid: message.id});
+});
 $('saveMessageEdit').onclick = reportTo('messageEditState', async () => {
   if (!editingMessage) return;
   const content = $('messageEditContent').value; $('saveMessageEdit').disabled = true;
@@ -309,3 +373,34 @@ window.onkeydown = event => { if ($('voicePanel').open || capturingKey) legacyKe
 const legacyKeyup = window.onkeyup;
 window.onkeyup = event => { if (recording || startPromise) legacyKeyup(event); };
 window.addEventListener('beforeunload', releaseMessageAudio);
+
+let stateLoading = false;
+let stateRefreshQueued = false;
+let lastStateConversation = null;
+let lastStateRefresh = 0;
+async function refreshCompanionState(force = false) {
+  if (!activeConversationId) return;
+  const cid = activeConversationId, bar = $('companionStateBar');
+  if (cid !== lastStateConversation) bar.hidden = true;
+  if (stateLoading) { if (force) stateRefreshQueued = true; return; }
+  if (!force && lastStateConversation === cid && Date.now() - lastStateRefresh < 60000) return;
+  stateLoading = true;
+  try {
+    const {change} = await companionApi(`/api/role-state/${cid}/latest-change`);
+    if (cid !== activeConversationId) return;
+    lastStateConversation = cid; lastStateRefresh = Date.now();
+    bar.hidden = !change || change.status === 'disabled';
+    if (bar.hidden) return;
+    const format = n => Number(n.toFixed(2)).toString();
+    const labels = {unchanged:'没有情绪变动',invalid:'情绪填写无效，本轮未更新',stale:'旧结果未覆盖后续修改'};
+    $('companionStateText').textContent = change.changes.length
+      ? change.changes.map(c => `${c.emotion} ${format(c.before)} → ${format(c.after)} (${c.after > c.before ? '+' : ''}${format(c.after-c.before)})`).join(' · ')
+      : labels[change.status] || '没有情绪变动';
+    bar.title = `${change.source === 'heartbeat' ? '主动消息' : '会话回复'} · ${new Date(change.at).toLocaleString()}`;
+  } catch { if (cid === activeConversationId) bar.hidden = true; }
+  finally {
+    stateLoading = false;
+    if (stateRefreshQueued) {stateRefreshQueued = false; void refreshCompanionState(true);}
+  }
+}
+setInterval(() => void refreshCompanionState(), 60000);

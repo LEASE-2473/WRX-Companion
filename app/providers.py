@@ -432,6 +432,8 @@ class OpenAICompatibleLlm(LlmProvider):
         for attempt in range(3):
             try:
                 async with self.client().stream("POST", endpoint, headers=headers, json=payload) as response:
+                    if response.is_error:
+                        await response.aread()
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line.startswith("data:"):

@@ -17,6 +17,20 @@ from .models import (
 ProviderKind = Literal["stt", "llm", "tts"]
 
 
+def resolve_llm(conversation_id=None, profile_id=None):
+    if not profile_id and conversation_id:
+        from . import companion_store
+        conv = companion_store.get_conversation(conversation_id)
+        profile_id = companion_store.get_character(conv.character_id).llm_profile_id
+    profile_id = profile_id or load_provider_profiles().active_llm_profile_id
+    if not profile_id:
+        raise ValueError('请在模型与语音中保存并选择 LLM Profile')
+    profile = get_profile('llm', profile_id)
+    if profile.purpose != 'chat':
+        raise ValueError('对话或情绪任务必须选择对话用途的 LLM Profile')
+    return profile
+
+
 @dataclass(frozen=True)
 class ProviderSnapshot:
     stt: SttProviderProfile
@@ -68,12 +82,14 @@ def upsert_provider_profile(kind: ProviderKind, value: dict, path: Path | None =
         incoming["api_key"] = existing.api_key
     profile = _profile_model(kind).model_validate(incoming)
     index = next((index for index, item in enumerate(collection) if item.id == profile.id), None)
+    if kind == "llm" and getattr(state, _active_name(kind)) == profile.id and profile.purpose != "chat":
+        raise ValueError("主会话 Profile 不能改成 Embedding/Rerank 用途")
     if index is None:
         collection.append(profile)
     else:
         collection[index] = profile
     active_name = _active_name(kind)
-    if not getattr(state, active_name):
+    if not getattr(state, active_name) and (kind != "llm" or profile.purpose == "chat"):
         setattr(state, active_name, profile.id)
     save_provider_profiles(state, path)
     return state
@@ -85,7 +101,7 @@ def delete_provider_profile(kind: ProviderKind, profile_id: str, path: Path | No
     collection[:] = [item for item in collection if item.id != profile_id]
     active_name = _active_name(kind)
     if getattr(state, active_name) == profile_id:
-        setattr(state, active_name, collection[0].id if collection else None)
+        setattr(state, active_name, next((p.id for p in collection if kind != "llm" or p.purpose == "chat"), None))
     save_provider_profiles(state, path)
     return state
 
@@ -95,6 +111,8 @@ def set_active_provider_profile(kind: ProviderKind, profile_id: str, path: Path 
     collection = getattr(state, _collection_name(kind))
     if not any(item.id == profile_id for item in collection):
         raise KeyError(f"{kind.upper()} Provider Profile 不存在：{profile_id}")
+    if kind == 'llm' and next(item for item in collection if item.id==profile_id).purpose != 'chat':
+        raise ValueError('Embedding/Rerank Profile 不能设为主会话 LLM')
     setattr(state, _active_name(kind), profile_id)
     save_provider_profiles(state, path)
     return state
