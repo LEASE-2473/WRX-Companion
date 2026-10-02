@@ -2,7 +2,8 @@ import asyncio
 import secrets
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from . import companion_store as store, role_tools as tools
+from . import companion_store as store
+from .tools.toy import controller as tools
 
 router = APIRouter(prefix='/api/role-tools')
 

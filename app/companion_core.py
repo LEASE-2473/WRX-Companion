@@ -296,7 +296,7 @@ class CompanionCore:
                 try:
                     skill_trace = []
                     tool_trace = []
-                    from . import role_tools
+                    from .tools.toy import controller as role_tools
                     tool_message = None
                     async def prepare_tools():
                         nonlocal tool_message

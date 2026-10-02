@@ -1,0 +1,207 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_get_state",
+      "description": "读取现有连接、电量、通知、最近控制请求和日志。不扫描、不连接。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_set_intensity",
+      "description": "设置三个通道的完整强度。待发自由强度由最新值覆盖，使用既有连接，持续生效直到下一条强度或停止命令；不会自动停止。物理功能名称待用户确认。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "channel1": {
+            "type": "integer",
+            "anyOf": [
+              {
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "minimum": 15,
+                "maximum": 100
+              }
+            ],
+            "description": "0关闭该通道；15–100为源码UI强度。不是0–255原始字节。"
+          },
+          "channel2": {
+            "type": "integer",
+            "anyOf": [
+              {
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "minimum": 15,
+                "maximum": 100
+              }
+            ],
+            "description": "0关闭该通道；15–100为源码UI强度。不是0–255原始字节。"
+          },
+          "channel3": {
+            "type": "integer",
+            "anyOf": [
+              {
+                "enum": [
+                  0
+                ]
+              },
+              {
+                "minimum": 15,
+                "maximum": 100
+              }
+            ],
+            "description": "0关闭该通道；15–100为源码UI强度。不是0–255原始字节。"
+          }
+        },
+        "required": [
+          "channel1",
+          "channel2",
+          "channel3"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_play_mode",
+      "description": "播放源码中的经典三通道波形。按原Speed节拍发送变化帧，直到用户暂停或停止。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode_id": {
+            "type": "string",
+            "enum": [
+              "mode4",
+              "mode5",
+              "mode6",
+              "mode7",
+              "mode8",
+              "mode9",
+              "mode10",
+              "mode11"
+            ]
+          },
+          "speed_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9,
+            "description": "默认3，125ms每帧；0慢155ms，9快65ms。"
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "single",
+              "sequential",
+              "random"
+            ]
+          }
+        },
+        "required": [
+          "mode_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_pause_mode",
+      "description": "暂停波形并发送停止命令，保留播放位置。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_resume_mode",
+      "description": "从暂停位置继续原波形播放。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_set_speed",
+      "description": "设置经典模式速度索引0–9，沿用原Speed数组。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "speed_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          }
+        },
+        "required": [
+          "speed_index"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_stop",
+      "description": "按小程序字节停止全部运动通道。清空应用待发队列，等待当前系统写入返回后优先发送；工具立即返回不等于物理停止。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_query_battery",
+      "description": "提交55 00电量查询，回复通过持续通知更新状态；不重新订阅或等待反馈。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toy_query_function_status",
+      "description": "提交55 0B功能状态查询；55 8B的两个原始字段通过通知更新，位含义尚未确认。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  }
+]

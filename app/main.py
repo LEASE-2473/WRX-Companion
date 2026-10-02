@@ -99,7 +99,7 @@ async def lifespan(app):
         await asyncio.gather(memory_scheduler, return_exceptions=True)
         await asyncio.gather(scheduler, return_exceptions=True)
         await core.shutdown()
-        from .role_tools import shutdown as shutdown_tools
+        from .tools.toy.controller import shutdown as shutdown_tools
         await asyncio.to_thread(shutdown_tools)
 
 app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)

@@ -40,3 +40,6 @@ Desktop.ini
 /docs/PHASE4_DEVELOPMENT_SUSPENSION.md
 
 /APP_STRUCTURE_PLAN.md
+
+# Toy 本地解包研究环境；正式运行模块在 app/tools/toy
+/Toy connection/

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from app import role_tools as tools, companion_store as store
+from app import companion_store as store
+from app.tools.toy import controller as tools
 from app.main import app
 from app.models import LlmProviderProfile, TokenUsage
 from app.providers import OpenAICompatibleLlm, ProviderError

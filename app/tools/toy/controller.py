@@ -6,14 +6,15 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
 
-ROOT = Path(__file__).resolve().parents[1]
-TOY = ROOT / 'Toy connection'
-SKILL = Path(__file__).parent / 'tool_skills' / 'toy-control' / 'SKILL.md'
-BASE = 'http://127.0.0.1:8766'
+ROOT = Path(__file__).resolve().parents[3]
+TOY = Path(__file__).resolve().parent
+SKILL = TOY / 'skill' / 'SKILL.md'
+BASE = 'http://127.0.0.1:8767'
 ROUTES = {'toy_get_state':'state', 'toy_set_intensity':'intensity', 'toy_stop':'stop',
           'toy_query_battery':'battery', 'toy_query_function_status':'function-status',
           'toy_play_mode':'play-mode', 'toy_pause_mode':'pause-mode',
@@ -162,7 +163,7 @@ def page():
         html = r.read().decode('utf-8')
     match = re.search(r"const token='([^']+)'", html)
     if not match:
-        raise ValueError('8766端口不是可识别的玩具服务，未启动或替换进程。')
+        raise ValueError('8767端口不是可识别的玩具服务，未启动或替换进程。')
     return html, match.group(1)
 
 
@@ -212,13 +213,10 @@ def start(cid):
         except ValueError:
             raise
         except OSError:
-            python = TOY / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-            if not python.exists():
-                raise ValueError('缺少Toy connection的Python环境，请先在服务机部署已验收的工具环境。')
-            logs = TOY / 'research/live'
+            logs = ROOT / 'data' / 'toy'
             logs.mkdir(parents=True, exist_ok=True)
             with (logs/'main-project-child.log').open('ab') as output:
-                _child = subprocess.Popen([str(python), 'ble_web.py', '--no-browser'], cwd=TOY,
+                _child = subprocess.Popen([sys.executable, '-m', 'app.tools.toy.service', '--no-browser'], cwd=ROOT,
                     stdout=output, stderr=output,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             for _ in range(30):
@@ -237,7 +235,7 @@ def start(cid):
 
 
 def definitions():
-    tools = json.loads((TOY/'ai_tools.json').read_text(encoding='utf-8')) + [json.loads(json.dumps(SEQUENCE_TOOL))]
+    tools = json.loads((TOY/'resources'/'tools.json').read_text(encoding='utf-8')) + [json.loads(json.dumps(SEQUENCE_TOOL))]
     # Gemini兼容网关拒绝整数enum。描述中保留离散范围，执行器仍严格拒绝1–14。
     def portable(schema):
         if schema.get('type') == 'integer' and 'anyOf' in schema:

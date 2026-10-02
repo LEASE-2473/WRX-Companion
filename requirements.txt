@@ -5,3 +5,4 @@ websockets>=13,<16
 pydantic>=2.8,<3
 pytest>=8,<9
 tzdata>=2024.1
+bleak==3.0.2
