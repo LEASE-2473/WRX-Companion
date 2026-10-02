@@ -108,6 +108,10 @@ def test_search_modes_and_saved_sources(llm, monkeypatch, mode, decision, expect
         if expected_calls:
             assert any('天气来源' in m.content for m in llm.calls[-1][:-1])
             assert llm.calls[-1][-1].role == 'user'
+            # 搜索来源保存在会话供界面查看，下一轮不注入旧检索资料。
+            events(send(client, cid, mode='OFF'))
+            assert all('天气来源' not in m.content for m in llm.calls[-1])
+            assert store.get_conversation(cid).messages[1].sources
 
 
 def test_search_on_disabled_is_clear_error_and_auto_can_chat(llm):

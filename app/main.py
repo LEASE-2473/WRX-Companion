@@ -99,9 +99,13 @@ async def lifespan(app):
         await asyncio.gather(memory_scheduler, return_exceptions=True)
         await asyncio.gather(scheduler, return_exceptions=True)
         await core.shutdown()
+        from .role_tools import shutdown as shutdown_tools
+        await asyncio.to_thread(shutdown_tools)
 
 app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)
 app.include_router(companion_router)
+from .role_tool_routes import router as role_tool_router
+app.include_router(role_tool_router)
 from .role_memory_routes import router as role_memory_router
 app.include_router(role_memory_router)
 from .chat_skill_routes import router as chat_skill_router

@@ -405,6 +405,64 @@ class OpenAICompatibleLlm(LlmProvider):
         self.last_usage = merge_usage(self.last_usage, read_usage(body))
         self.last_prompt_tokens = self.last_usage.input_tokens
 
+    async def stream_function_tools(self, messages):
+        """一次原生函数请求；完整接收后执行，不重试有副作用的请求。"""
+        profile = self.profile
+        if not profile.api_key or not profile.model:
+            raise ProviderError('缺少 LLM API Key 或 Model')
+        self.last_usage = TokenUsage()
+        self.last_prompt_tokens = None
+        payload = {'model':profile.model, 'messages':[m.api_message() for m in messages],
+                   **self.generation_parameters, 'stream':True,
+                   'tools':self.function_tools, 'tool_choice':'auto', 'parallel_tool_calls':False}
+        calls = {}
+        finish_reason = None
+        async with self.client().stream('POST', profile.base_url.rstrip('/')+'/chat/completions',
+                headers={'Authorization':f'Bearer {profile.api_key}'}, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith('data:'):
+                    continue
+                raw = line[5:].strip()
+                if raw == '[DONE]':
+                    break
+                body = json.loads(raw)
+                self.record_usage(body)
+                for choice in body.get('choices', []):
+                    if choice.get('index', 0) != 0:
+                        continue
+                    delta = choice.get('delta') or {}
+                    if delta.get('content'):
+                        yield delta['content']
+                    for piece in delta.get('tool_calls') or []:
+                        index = piece.get('index', 0)
+                        call = calls.setdefault(index, {'id':'', 'name':'', 'arguments':''})
+                        call['id'] += piece.get('id') or ''
+                        fn = piece.get('function') or {}
+                        call['name'] += fn.get('name') or ''
+                        call['arguments'] += fn.get('arguments') or ''
+                    if choice.get('finish_reason') is not None:
+                        finish_reason = choice['finish_reason']
+        if finish_reason not in {'stop', 'tool_calls'} or (calls and finish_reason != 'tool_calls'):
+            raise ProviderError('工具请求流提前结束，未执行任何工具')
+        if len(calls) > 1:
+            raise ProviderError('单轮工具调用超过上限，未执行')
+        checked = []
+        allowed = {t['function']['name'] for t in self.function_tools}
+        for index in sorted(calls):
+            call = calls[index]
+            if call['name'] not in allowed:
+                raise ProviderError('模型返回未暴露的工具，未执行')
+            try:
+                args = json.loads(call['arguments'])
+            except (ValueError, TypeError) as exc:
+                raise ProviderError('工具参数JSON不完整或无效，未执行') from exc
+            if not isinstance(args, dict):
+                raise ProviderError('工具参数不是对象，未执行')
+            checked.append((call, args))
+        for call, args in checked:
+            await self.function_executor(call['name'], args)
+
     async def complete(self, messages: list[ChatMessage]) -> str:
         text, _ = await self.complete_with_metrics(messages)
         return text
@@ -420,6 +478,10 @@ class OpenAICompatibleLlm(LlmProvider):
         return "".join(pieces), first_token_at
 
     async def stream_complete(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+        if getattr(self, 'function_tools', None):
+            async for piece in self.stream_function_tools(messages):
+                yield piece
+            return
         profile = self.profile
         if not profile.api_key or not profile.model:
             raise ProviderError("缺少 LLM API Key 或 Model")
@@ -429,7 +491,9 @@ class OpenAICompatibleLlm(LlmProvider):
         emitted = False
         endpoint = f"{profile.base_url.rstrip('/')}/chat/completions"
         headers = {"Authorization": f"Bearer {profile.api_key}"}
-        for attempt in range(3):
+        single_attempt = getattr(self, "single_text_attempt", False)
+        attempts = 1 if single_attempt else 3
+        for attempt in range(attempts):
             try:
                 async with self.client().stream("POST", endpoint, headers=headers, json=payload) as response:
                     if response.is_error:
@@ -463,20 +527,23 @@ class OpenAICompatibleLlm(LlmProvider):
                 break
             except httpx.TransportError:
                 # 只在还没有输出正文时重试，避免已经交给 TTS 的半段回复被重复发送。
-                if emitted or attempt >= 2:
+                if emitted or attempt >= attempts - 1:
                     raise
                 await asyncio.sleep(0.3)
             except httpx.HTTPStatusError as exc:
                 unsupported_usage = exc.response.status_code in {400, 422} and "stream_options" in exc.response.text
-                if not emitted and unsupported_usage and "stream_options" in payload and attempt < 2:
+                if not emitted and unsupported_usage and "stream_options" in payload and attempt < attempts - 1:
                     payload.pop("stream_options")
                     continue
                 retryable = exc.response.status_code in {408, 429, 500, 502, 503, 504}
-                if emitted or attempt >= 2 or not retryable:
+                if emitted or attempt >= attempts - 1 or not retryable:
                     raise
                 await asyncio.sleep(0.3)
         if emitted:
             return
+
+        if single_attempt:
+            raise ProviderError("工具结果补写未返回正文；不再追加请求")
 
         # 部分 OpenAI-compatible 聚合服务会偶发以 200 + [DONE] 结束，却不返回正文。
         # 使用同一模型、同一 messages 做一次非流式兜底，不改变模型或回复参数。

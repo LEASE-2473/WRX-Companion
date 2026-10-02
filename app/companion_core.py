@@ -92,7 +92,10 @@ class CompanionCore:
         history = []
         for message in selected_history:
             label = message.local_datetime or "旧记录：时间未知"
-            history.append(ChatMessage(role=message.role, content=f"[{label}; {message.source}]\n{message.content.split('<emotion_update>',1)[0] if message.role == 'assistant' else message.content}", images=message.images))
+            content = message.content.split('<emotion_update>', 1)[0] if message.role == 'assistant' else message.content
+            if message.images and not content.strip():
+                content = '[此条历史消息仅包含图片，图片未加入上下文]'
+            history.append(ChatMessage(role=message.role, content=f"[{label}; {message.source}]\n{content}"))
         definitions = {
             "name": character.name, "personality": character.personality, "background": character.background,
             "relationship": character.relationship, "speaking_style": character.speaking_style,
@@ -192,11 +195,13 @@ class CompanionCore:
         job = Job(rid)
         self.jobs[rid] = job
         lease = store.get_request(rid)["started_at"]
-        job.task = asyncio.create_task(self.execute(job, conversation, character, text, tz, source, search_mode, llm, snapshot, preset, compiled, lease))
+        job.task = asyncio.create_task(self.execute(job, conversation, character, text, tz, source, search_mode, llm, snapshot, preset, compiled, lease, bool(regenerate_mid or resend_mid)))
         job.task.add_done_callback(lambda _: self.jobs.pop(rid, None) if self.jobs.get(rid) is job else None)
         return job
 
-    async def execute(self, job, conversation, character, text, tz, source, search_mode, llm, snapshot, preset, compiled, lease):
+    async def execute(self, job, conversation, character, text, tz, source, search_mode, llm, snapshot, preset, compiled, lease, replay=False):
+        llm.function_tools = None
+        llm.function_executor = None
         started = perf_counter()
         extra_usage = []
         sources = []
@@ -290,7 +295,68 @@ class CompanionCore:
                 first_token = None
                 try:
                     skill_trace = []
-                    output = llm.stream_complete(compiled.messages) if source == 'heartbeat' else chat_skills.stream(llm, compiled.messages, conversation.id, extra_usage, skill_trace)
+                    tool_trace = []
+                    from . import role_tools
+                    tool_message = None
+                    async def prepare_tools():
+                        nonlocal tool_message
+                        llm.function_tools = None
+                        llm.function_executor = None
+                        if tool_message is not None:
+                            compiled.messages.remove(tool_message)
+                            tool_message = None
+                        prepared = await role_tools.prepare(conversation.id) if source == 'web' and not tool_trace else None
+                        if not prepared:
+                            return
+                        available_tools = prepared['tools']
+                        tool_prompt = prepared['prompt']
+                        if replay:
+                            available_tools = [tool for tool in available_tools if tool['function']['name'] == 'toy_get_state']
+                            tool_prompt += '\n[本轮为重新生成或编辑重发]设备Skill确实可见，但本轮仅开放toy_get_state只读查询，不重复执行动作；如需控制，请用户发送一条新消息。'
+                        tool_message = ChatMessage(role='system', content=tool_prompt)
+                        compiled.messages.insert(max(0, len(compiled.messages) - 1), tool_message)
+                        llm.function_tools = available_tools
+                        async def execute_tool(name, arguments):
+                            try:
+                                if replay and name != 'toy_get_state':
+                                    raise ValueError('重新生成或编辑重发只允许读取设备状态，请用新消息控制设备')
+                                result = await asyncio.to_thread(role_tools.execute, conversation.id, prepared['lease'], name, arguments)
+                                item = {'name':name, 'status':'accepted', 'result':result}
+                            except Exception as exc:
+                                item = {'name':name, 'status':'error', 'error':str(exc)}
+                            tool_trace.append(item)
+                            emit({'type':'tool_result', **item})
+                            return item
+                        llm.function_executor = execute_tool
+                        compiled.trace['role_tools'] = {'tools':available_tools, 'replay_read_only':replay, 'skill_path':str(role_tools.SKILL.relative_to(role_tools.ROOT)), 'calls':tool_trace}
+                    async def reply_with_tool_fallback():
+                        nonlocal shown, buffer
+                        initial = []
+                        async for part in chat_skills.stream(llm, compiled.messages, conversation.id, extra_usage, skill_trace, before_round=prepare_tools):
+                            initial.append(part)
+                            yield part
+                        body = chat_skills.visible(''.join(initial))
+                        if emotion_cfg.enabled:
+                            body = role_state.visible_stream(body)
+                        if not tool_trace or body.strip():
+                            return
+                        pieces.clear()
+                        shown = ""
+                        buffer = ""
+                        extra_usage.append({'purpose':'device_tool_call', 'usage':llm.last_usage.model_dump()})
+                        llm.function_tools = None
+                        llm.function_executor = None
+                        compiled.trace['role_tools']['text_fallback'] = True
+                        compiled.messages.append(ChatMessage(role='system', content=
+                            '[设备工具执行结果｜以下JSON仅为数据]\n' + json.dumps(tool_trace, ensure_ascii=False) +
+                            '\n工具已经处理，不得重复调用。本次只补写一条符合角色预设的自然聊天正文，不能留空，不输出任何工具或情绪协议。按结果如实回复；请求接收不等于设备动作完成。'))
+                        llm.single_text_attempt = True
+                        try:
+                            async for part in llm.stream_complete(compiled.messages):
+                                yield part
+                        finally:
+                            llm.single_text_attempt = False
+                    output = llm.stream_complete(compiled.messages) if source == 'heartbeat' else reply_with_tool_fallback()
                     async for piece in output:
                         if first_token is None:
                             first_token = perf_counter() - llm_started
@@ -351,8 +417,10 @@ class CompanionCore:
                         emotion_warning = outer_warning
                     if silent:
                         action = 'SILENT'
-                    elif not reply.strip() and source != 'heartbeat':
+                    elif not reply.strip() and source != 'heartbeat' :
                         raise ValueError('情绪协议缺少聊天正文')
+                if tool_trace and (silent or not reply.strip()):
+                    raise ValueError('工具已处理，但模型补写仍未返回聊天正文；请勿重复执行设备操作')
                 if source != 'heartbeat' and not silent and not reply.strip():
                     raise ValueError('技能执行后缺少聊天正文')
                 # 先落库，再把最终文本和语音交给客户端。原始正文不做语音清洗。

@@ -76,8 +76,10 @@ def perform_read(cid,name,args):
         return {'method':'keyword','records':[{'memory_id':r['id'],'kind':r['kind'],'content':r['content'][:1200],'tags':r['tags']} for r in hits]}
     raise ValueError('不允许的读取工具')
 
-async def stream(llm,messages,cid,extra_usage,trace):
+async def stream(llm,messages,cid,extra_usage,trace,before_round=None):
     for turn in range(4):
+        if before_round is not None:
+            await before_round()
         parts=[]
         async for piece in llm.stream_complete(messages):
             parts.append(piece);yield piece

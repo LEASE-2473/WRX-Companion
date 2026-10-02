@@ -162,7 +162,8 @@ def compile_prompt(
         raise ValueError("history_depth must be non-negative")
 
     clean_history = [
-        ChatMessage(role=message.role, content=message.content, images=message.images)
+        # 历史只发送文字；本轮附件由 current_images 单独传入。
+        ChatMessage(role=message.role, content=message.content)
         for message in history
         if message.role in {"user", "assistant"}
     ]

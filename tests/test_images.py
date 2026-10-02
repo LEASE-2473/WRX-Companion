@@ -38,7 +38,9 @@ def test_image_lifecycle(monkeypatch):
         edit = store.branch_conversation(cid, before[0].id, 'edit', '看这张图')
         assert edit['resend_images'] == [PNG]
         events(client.post(url, json={'request_id': str(uuid4()), 'content': '接着聊', 'search_mode': 'OFF'}))
-        assert any(m.images == [PNG] for m in fake.calls[-1])
+        assert all(not m.images for m in fake.calls[-1])
+        assert any('仅包含图片' in m.content for m in fake.calls[-1])
+        assert PNG not in str([m.api_message() for m in fake.calls[-1]])
         assert client.get(f'/api/conversations/{cid}').json()['messages'][0]['images'] == [PNG]
 
 
@@ -47,6 +49,18 @@ def test_image_validation_and_text_compatibility():
     for images in (['https://example.com/a.png'], ['data:image/png;base64,bm90LXBuZw=='], [PNG] * 5, ['data:image/png;base64,%%%']):
         with pytest.raises(ValueError):
             TextTurn(request_id='test', images=images)
+
+
+def test_compiler_omits_old_images_and_keeps_current_images():
+    from app.models import Lorebook
+    from app.prompt_store import default_wrx_preset
+    from app.prompt_compiler import compile_prompt
+    old = ChatMessage(role='user', content='旧图文字', images=[PNG])
+    compiled = compile_prompt(default_wrx_preset(), Lorebook(id='test', name='test'), 1, [old], '新图文字', current_images=[PNG])
+    assert all(not m.images for m in compiled.messages[:-1])
+    assert any(m.content == '旧图文字' for m in compiled.messages)
+    assert compiled.messages[-1].images == [PNG]
+    assert old.images == [PNG]
 
 
 def test_provider_sends_actual_multimodal_payload(monkeypatch):
