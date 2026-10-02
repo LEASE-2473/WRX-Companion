@@ -27,6 +27,17 @@ async def start(cid: str, request: Request):
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
+@router.post('/toy/close/{cid}')
+async def close(cid: str, request: Request):
+    try:
+        if request.headers.get('X-Role-Tools') != '1':
+            raise ValueError('请从角色工具入口关闭')
+        store.get_conversation(cid)
+        return await asyncio.to_thread(tools.close, cid)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get('/toy/panel')
 async def panel(cid: str):
     try:

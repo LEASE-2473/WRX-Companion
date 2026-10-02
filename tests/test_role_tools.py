@@ -20,11 +20,87 @@ def reset_bridge(monkeypatch):
     monkeypatch.setattr(tools, '_cache', {})
     monkeypatch.setattr(tools, '_cache_at', 0)
     monkeypatch.setattr(tools, '_program', {})
+    monkeypatch.setattr(tools, '_child', None)
+    monkeypatch.setattr(tools, '_panel_token', 'test-panel-token')
 
 
 def ready():
     return {'revision':'fake', 'connected':True, 'control_ready':True,
             'selected':{'name':'fake'}, 'playback':{'status':'stopped'}}
+
+
+def test_close_disables_skill_and_stale_controls_then_can_restart(monkeypatch):
+    import threading
+    monkeypatch.setattr(tools, '_enabled', True)
+    monkeypatch.setattr(tools, '_program_cancel', threading.Event())
+    monkeypatch.setattr(tools, '_program', {'status':'running'})
+    lease, token = tools._lease, tools._panel_token
+    actions = []
+    monkeypatch.setattr(tools, 'request', lambda action, args=None: actions.append(action) or {'closed':True})
+    def stopped():
+        raise ConnectionRefusedError()
+    monkeypatch.setattr(tools, 'page', stopped)
+    result = tools.close('test')
+    assert not result['attached'] and not result['service_running']
+    assert tools._program_cancel.is_set() and tools._lease != lease
+    assert asyncio.run(tools.prepare('test')) is None
+    with pytest.raises(ValueError):
+        tools.panel_request(token, 'intensity', {})
+    assert actions == ['shutdown']
+    monkeypatch.setattr(tools, 'page', lambda: ('', 'token'))
+    monkeypatch.setattr(tools, 'request', lambda *args: ready())
+    assert tools.start('test')['ready']
+    with pytest.raises(ValueError):
+        tools.execute('test', lease, 'toy_stop', {})
+
+
+def test_close_failure_remains_visible_and_retryable(monkeypatch):
+    monkeypatch.setattr(tools, '_enabled', True)
+    monkeypatch.setattr(tools, 'request', lambda *args: {'error':'failed'})
+    with pytest.raises(ValueError, match='关闭未确认'):
+        tools.close('test')
+    assert not tools._enabled
+    assert tools.status('test')['service_running']
+    assert tools.status('test')['error']
+    assert asyncio.run(tools.prepare('test')) is None
+
+
+def test_main_shutdown_waits_for_owned_service_and_preserves_warning(monkeypatch):
+    waited = []
+    child = SimpleNamespace(poll=lambda: None, wait=lambda timeout: waited.append(timeout))
+    monkeypatch.setattr(tools, '_child', child)
+    monkeypatch.setattr(tools, '_enabled', True)
+    monkeypatch.setattr(tools, 'request', lambda *args: {'closed':True, 'warnings':['停止写入未确认']})
+    tools.shutdown()
+    assert waited == [5] and tools._child is None
+    assert not tools._enabled and not tools.status('test')['service_running']
+    assert tools.status('test')['warning'] == '停止写入未确认'
+
+
+def test_close_route_requires_header_and_blocks_shutdown_proxy(monkeypatch):
+    conv = store.create_conversation()
+    calls = []
+    monkeypatch.setattr(tools, 'close', lambda cid: calls.append(cid) or {'attached':False})
+    with TestClient(app) as client:
+        assert client.post('/api/role-tools/toy/close/'+conv.id).status_code == 400
+        assert not calls
+        assert client.post('/api/role-tools/toy/ble/api/shutdown', json={},
+                           headers={'X-BLE-Token':tools._panel_token}).status_code == 400
+        assert client.post('/api/role-tools/toy/close/'+conv.id,
+                           headers={'X-Role-Tools':'1'}).status_code == 200
+        assert calls == [conv.id]
+
+
+def test_late_refresh_cannot_restore_closed_state(monkeypatch):
+    monkeypatch.setattr(tools, '_enabled', True)
+    def request(*args):
+        tools._enabled = False
+        tools._lease += 1
+        tools.remember({})
+        return ready()
+    monkeypatch.setattr(tools, 'request', request)
+    tools.refresh()
+    assert not tools.status('test')['service_running']
 
 
 def test_lazy_reuse_no_bluetooth_actions_and_proxy(monkeypatch):

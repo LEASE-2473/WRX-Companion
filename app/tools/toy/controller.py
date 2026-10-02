@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import urllib.request
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[3]
 TOY = Path(__file__).resolve().parent
@@ -132,6 +133,9 @@ def start_program(cid, lease, args):
 
 
 def shutdown():
+    if _child is not None and _child.poll() is None:
+        close('')
+        return
     with _launch_lock:
         running = _program.get('status') == 'running'
         cancel_program('主服务关闭')
@@ -168,12 +172,12 @@ def page():
 
 
 def request(action, args=None):
-    if action not in PANEL_ACTIONS:
+    if action not in PANEL_ACTIONS | {'shutdown'}:
         raise ValueError('未知玩具操作')
     _, token = page()
     req = urllib.request.Request(BASE + '/api/' + action,
         data=json.dumps(args or {}).encode(), headers={'Content-Type':'application/json', 'X-BLE-Token':token})
-    with urllib.request.urlopen(req, timeout=55 if action in {'connect','disconnect'} else 3) as r:
+    with urllib.request.urlopen(req, timeout=55 if action in {'connect','disconnect','shutdown'} else 3) as r:
         return json.load(r)
 
 
@@ -184,23 +188,26 @@ def remember(value):
 
 
 def refresh():
+    enabled, lease = _enabled, _lease
     try:
         value = request('state')
-        remember(value)
+        if (_enabled, _lease) == (enabled, lease):
+            remember(value)
         return value
     except Exception as exc:
-        remember({'connected':False, 'error':str(exc)})
+        if (_enabled, _lease) == (enabled, lease):
+            remember({'connected':False, 'error':str(exc)})
         return _cache
 
 
 def status(cid):
-    value = _cache if time.monotonic() - _cache_at < 5 else {}
+    value = _cache if not _enabled or time.monotonic() - _cache_at < 5 else {}
     attached = _enabled
     return {'id':'toy', 'name':'玩具控制', 'attached':attached,
             'connected':attached and bool(value.get('connected')),
             'ready':attached and bool(value.get('connected') and value.get('control_ready')),
             'service_running':bool(value.get('revision')), 'revision':value.get('revision'),
-            'error':value.get('error'), 'skill_configured':SKILL.exists(),
+            'error':value.get('error'), 'warning':value.get('warning'), 'skill_configured':SKILL.exists(),
             'device':value.get('selected') if attached else None,
             'program':dict(_program) if attached else None}
 
@@ -231,6 +238,35 @@ def start(cid):
                 raise ValueError('玩具服务启动尚未就绪，未进行蓝牙操作。')
         _enabled = True
         refresh()
+        return status(cid)
+
+
+def close(cid):
+    global _enabled, _lease, _panel_token, _child
+    with _launch_lock:
+        _enabled = False
+        _lease += 1
+        _panel_token = secrets.token_urlsafe(32)
+        cancel_program('用户关闭工具')
+        try:
+            result = request('shutdown')
+            if not result.get('closed'):
+                raise ValueError('后台未确认关闭')
+            if _child is not None:
+                _child.wait(timeout=5)
+                _child = None
+            remember({'warning': '；'.join(result.get('warnings', []))})
+        except ConnectionRefusedError:
+            remember({})
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ConnectionRefusedError):
+                remember({})
+            else:
+                remember({'revision':'unknown', 'error':'后台关闭未确认：' + str(exc)})
+                raise ValueError('后台关闭未确认，请重试关闭工具。') from exc
+        except Exception as exc:
+            remember({'revision':'unknown', 'error':'后台关闭未确认：' + str(exc)})
+            raise ValueError('后台关闭未确认，请重试关闭工具。') from exc
         return status(cid)
 
 

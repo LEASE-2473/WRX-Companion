@@ -61,6 +61,7 @@ class Bridge:
         self.inflight_control = False
         self.inflight_task = None
         self.inflight_is_query = False
+        self.closing = False
 
     def log(self, message):
         self.logs.append(f'{datetime.now():%H:%M:%S}  {message}')
@@ -83,6 +84,8 @@ class Bridge:
                     speed_ms=SPEEDS)
 
     async def action(self, command, data):
+        if self.closing and command != 'state':
+            raise RuntimeError('工具正在关闭，请稍后重新启动。')
         if command == 'state':
             return self.state()
         if self.lock.locked():
@@ -190,6 +193,41 @@ class Bridge:
                 self.log(f'失败：{message}')
                 raise RuntimeError(message) from exc
         return self.state()
+
+    async def close(self):
+        self.closing = True
+        warnings = []
+        async with self.lock:
+            self.end_mode()
+            try:
+                await self.stop_scan()
+            except Exception as exc:
+                warnings.append('结束扫描失败：' + str(exc))
+            try:
+                if self.client and self.client.is_connected and self.writer:
+                    self.dispatch(STOP, '关闭工具并停止')
+                    record = self.last_command
+                    deadline = time.monotonic() + 3
+                    while not record.get('write_ack') and not record.get('error'):
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError('停止写入未确认')
+                        await asyncio.sleep(.05)
+                    if record.get('error'):
+                        raise RuntimeError(record['error'])
+            except Exception as exc:
+                warnings.append('停止设备失败：' + str(exc))
+            finally:
+                self.clear_waiting('工具关闭')
+                if self.setup_task:
+                    self.setup_task.cancel()
+                if self.client:
+                    try:
+                        await asyncio.wait_for(self.client.disconnect(), 10)
+                    except Exception as exc:
+                        warnings.append('断开设备失败：' + str(exc))
+                self.client = None
+                self.current_intensity = [0, 0, 0]
+        return {'closed': True, 'warnings': warnings}
 
     def discovered(self, device, adv):
         self.devices[device.address] = (device, adv)
@@ -466,6 +504,16 @@ class Handler(BaseHTTPRequestHandler):
                 or self.headers.get('Origin') not in (None, f'http://127.0.0.1:{PORT}')):
             return self.send(403, json.dumps(dict(error='请求被拒绝。')))
         command = self.path.removeprefix('/api/')
+        if command == 'shutdown' and self.path == '/api/shutdown':
+            try:
+                result = asyncio.run_coroutine_threadsafe(bridge.close(), loop).result(timeout=50)
+            except Exception as exc:
+                return self.send(500, json.dumps({'error': str(exc)}))
+            try:
+                self.send(200, json.dumps(result, ensure_ascii=False))
+            finally:
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if self.path not in ['/api/' + c for c in ('state', 'scan', 'scan-stop', 'connect', 'disconnect', 'battery', 'function-status', 'intensity', 'stop', 'play-mode', 'pause-mode', 'resume-mode', 'speed')]:
             return self.send(404, '{}')
         try:
@@ -498,7 +546,8 @@ if __name__ == '__main__':
         pass
     finally:
         try:
-            asyncio.run_coroutine_threadsafe(bridge.action('disconnect', {}), loop).result(timeout=12)
+            if not bridge.closing:
+                asyncio.run_coroutine_threadsafe(bridge.close(), loop).result(timeout=50)
         finally:
             server.server_close()
             loop.call_soon_threadsafe(loop.stop)
