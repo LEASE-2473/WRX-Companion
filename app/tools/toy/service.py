@@ -12,8 +12,8 @@ import time
 import webbrowser
 
 from bleak import BleakClient, BleakScanner
-from .records import save
-from .protocol import NAME, SERVICE, WRITE_UUID, NOTIFY_UUID, STOP, BATTERY, FUNCTION_STATUS, intensity
+from app.tools.toy.records import save
+from app.tools.toy.protocol import NAME, SERVICE, WRITE_UUID, NOTIFY_UUID, STOP, BATTERY, FUNCTION_STATUS, intensity
 
 ROOT = Path(__file__).resolve().parent / "resources"
 PORT = 8767

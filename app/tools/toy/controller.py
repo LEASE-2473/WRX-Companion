@@ -1,3 +1,4 @@
+from app.common.identity import new_id
 """角色工具桥：按需启动本机BLE服务，不自动扫描、连接或断开。"""
 import asyncio
 import json
@@ -124,7 +125,7 @@ def start_program(cid, lease, args):
     global _program, _program_cancel, _program_thread
     cancel_program('被新序列替换')
     _program_cancel = threading.Event()
-    _program = {'id':secrets.token_hex(8),'status':'running','frames_sent':0,
+    _program = {'id':new_id(),'status':'running','frames_sent':0,
                 'frame_ms':args['frame_ms'],'duration_seconds':args['duration_seconds']}
     _program_thread = threading.Thread(target=run_program,
         args=(cid, lease, _program_cancel, args['frames'], args['frame_ms'], args['duration_seconds']), daemon=True)

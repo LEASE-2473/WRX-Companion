@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WRX Companion</title><link rel="stylesheet" href="/static/styles.css?v=20261001-companion"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WRX Companion</title><link rel="stylesheet" href="/static/shared/styles.css?v=20261001-companion"></head>
 <body>
-<link rel="stylesheet" href="/static/chat-ui.css?v=20261001-action-linebox">
+<link rel="stylesheet" href="/static/chat/chat-ui.css?v=20261003-compact-20261001-action-linebox">
 <main class="chat-app">
   <aside class="chat-sidebar" aria-label="角色与会话">
     <div class="brand"><span class="brand-mark">W</span><div><strong>WRX Companion</strong><small id="mode">2.0</small></div></div>
@@ -150,16 +150,21 @@
 <dialog id="lorebookImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>Lorebook 导入报告</h2><button id="closeLorebookImport" aria-label="关闭">关闭</button></div><pre id="lorebookImportReport"></pre><div class="button-row"><button id="confirmLorebookImport">确认导入并启用</button></div></dialog>
 <dialog id="vectorImportDialog" class="llm-debug-dialog"><div class="dialog-header"><h2>向量预切片导入报告</h2><button id="closeVectorImport" aria-label="关闭">关闭</button></div><pre id="vectorImportReport"></pre><div class="button-row"><button id="confirmVectorImport">确认导入（暂不调用模型）</button></div></dialog>
 <dialog id="vectorChunksDialog" class="manager-dialog vector-chunks-dialog"><div class="dialog-header"><div><span class="section-kicker">VECTOR CHUNKS</span><h2 id="vectorChunksTitle">查看向量切片</h2></div><button id="closeVectorChunks" class="dialog-close" aria-label="关闭切片检查器">关闭</button></div><div class="dialog-scroll"><div class="vector-chunk-toolbar"><label>搜索 ID、正文或元数据<input id="vectorChunkSearch" placeholder="输入关键词后回车"></label><button id="searchVectorChunks">搜索</button><button id="clearVectorChunkSearch">清除</button></div><span id="vectorChunksSummary" class="hint"></span><div id="vectorChunksList" class="vector-chunks-list"></div><div class="vector-chunk-pagination"><button id="previousVectorChunks">上一页</button><span id="vectorChunksPage" class="hint"></span><button id="nextVectorChunks">下一页</button></div></div></dialog>
-<script src="/static/app.js?v=20261002-history-time"></script>
-<script src="/static/companion.js?v=20261002-model-heartbeat"></script>
-<script src="/static/chat-ui.js?v=20261001-inline-edit"></script>
-<link rel="stylesheet" href="/static/settings-design.css?v=20261001-settings-design">
-<link rel="stylesheet" href="/static/role-memory.css?v=20261002-history-time">
-<script src="/static/role-memory.js?v=20261002-history-time"></script>
-<link rel="stylesheet" href="/static/autonomy.css?v=20261001-travel">
-<script src="/static/autonomy.js?v=20261001-archived"></script>
-<link rel="stylesheet" href="/static/role-state.css?v=20261001-role-state-r4">
-<script src="/static/role-state.js?v=20261002-model-heartbeat"></script>
-<link rel="stylesheet" href="/static/context-debug.css?v=20261001"><script src="/static/context-debug.js?v=20261001"></script>
-<link rel="stylesheet" href="/static/role-tools.css?v=20261003"><script src="/static/role-tools.js?v=20261003"></script>
+<script src="/static/shared/state.js?v=20261004-organized"></script>
+<script src="/static/settings/app.js?v=20261004-organized"></script>
+<script src="/static/voice/voice-ui.js?v=20261004-organized"></script>
+<script src="/static/chat/companion.js?v=20261004-organized"></script>
+<script src="/static/chat/chat-ui.js?v=20261004-organized"></script>
+<link rel="stylesheet" href="/static/settings/settings-design.css?v=20261001-settings-design">
+<link rel="stylesheet" href="/static/memory/role-memory.css?v=20261003-compact">
+<script src="/static/memory/role-memory.js?v=20261004-organized"></script>
+<link rel="stylesheet" href="/static/memory/system-memory.css?v=20261003-v2">
+<script src="/static/memory/system-memory.js?v=20261004-four-tables-20261003-books"></script>
+<link rel="stylesheet" href="/static/autonomy/autonomy.css?v=20261001-travel">
+<script src="/static/autonomy/autonomy.js?v=20261001-archived"></script>
+<link rel="stylesheet" href="/static/character/role-state.css?v=20261001-role-state-r4">
+<script src="/static/character/role-state.js?v=20261002-model-heartbeat"></script>
+<link rel="stylesheet" href="/static/chat/context-debug.css?v=20261001"><script src="/static/chat/context-debug.js?v=20261001"></script>
+<link rel="stylesheet" href="/static/tools/role-tools.css?v=20261003"><script src="/static/tools/role-tools.js?v=20261003"></script>
+<link rel="stylesheet" href="/static/shared/compact-ui.css?v=20261003">
 </body></html>

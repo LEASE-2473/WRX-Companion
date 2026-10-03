@@ -1,1 +1,1 @@
-"""Voice agent application."""
+"""WRX Companion application."""

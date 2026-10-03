@@ -34,16 +34,24 @@ macOS / Linux 创建虚拟环境后使用 `.venv/bin/python` 执行相同 pip / 
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-node tests/provider_ui_test.cjs
-node tests/reply_format_test.cjs
+node tests/ui/provider_ui_test.cjs
+node tests/ui/reply_format_test.cjs
 ```
 
 测试使用离线模拟供应商，不代表真实 LLM / 搜索 / TTS 联调已完成。界面和功能说明见 [使用指南](docs/COMPANION_GUIDE.md)。
 
-服务目前没有鉴权，启动默认仅监听本机；公网部署需要另行配置鉴权、HTTPS 和访问控制。已支持角色日记、事件与冷热记忆；手机系统通知尚未实现，自主外出功能当前停用。
+服务目前没有鉴权，启动默认仅监听本机；公网部署需要另行配置鉴权、HTTPS 和访问控制。已支持角色日记、系统四表、外部世界书与冷热记忆；手机系统通知尚未实现，自主外出功能当前停用。
 
-本地开发的项目上下文、变更记录、规划、讨论及审计文档不随公开版本发布。应用技能与数据库说明分别见 [技能说明](SKILLS.md) 和 [数据库字段](DATABASE_FIELDS.md)。
+本地开发的项目上下文、变更记录、规划、讨论及审计文档不随公开版本发布。应用技能与数据库说明分别见 [技能说明](docs/reference/SKILLS.md) 和 [数据库字段](docs/reference/DATABASE_FIELDS.md)。
 
 ## 角色工具
 
-蓝牙运行模块已包含在 `app/tools/toy/`，Python 程序、面板、模式数据、工具定义与 Skill 随主应用一起部署，依赖统一由根目录 `requirements.txt` 安装。主应用启动时不启动蓝牙后台；从侧栏「角色工具」的玩具卡片点击「启动工具」，才按需启动本机 8767 服务，由用户手动扫描和连接。不使用时点击「关闭工具」，停止播放、结束扫描、断开设备并退出后台；「收起面板」保留运行。仅接入且设备就绪时向聊天提供 Skill。无需 `Toy connection/` 或单独的 Python 环境，接入说明见 [角色工具文档](docs/ROLE_TOOLS.md)。
+蓝牙运行模块已包含在 `app/tools/toy/`，Python 程序、面板、模式数据、工具定义与 Skill 随主应用一起部署，依赖统一由根目录 `requirements.txt` 安装。主应用启动时不启动蓝牙后台；从侧栏「角色工具」的玩具卡片点击「启动工具」，才按需启动本机 8767 服务，由用户手动扫描和连接。不使用时点击「关闭工具」，停止播放、结束扫描、断开设备并退出后台；「收起面板」保留运行。仅接入且设备就绪时向聊天提供 Skill。无需 `Toy connection/` 或单独的 Python 环境，接入说明见 [角色工具文档](docs/modules/tools/ROLE_TOOLS.md)。
+
+## 项目目录
+
+应用按功能分包，入口保持 `app.main:app`。后端、前端、测试及文档的职责与迁移映射见 [目录索引](docs/PROJECT_STRUCTURE.md)。
+
+## 维护与文件位置
+
+完整导航见[docs/README.md](docs/README.md)，逐文件用途见[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)，跨模块修改见[docs/MAINTENANCE.md](docs/MAINTENANCE.md)。正式运行资源全部随app分发，七份任务提示词在app/memory/prompts；私人数据仍在data。实验台在experiments，历史说明在docs/archive。

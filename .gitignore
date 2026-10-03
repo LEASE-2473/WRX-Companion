@@ -17,6 +17,8 @@ htmlcov/
 # 本地运行状态与日志
 data/
 logs/
+/remote service backup/
+/remote service prepared/
 *.log
 
 # 编辑器与操作系统临时文件
@@ -43,3 +45,11 @@ Desktop.ini
 
 # Toy 本地解包研究环境；正式运行模块在 app/tools/toy
 /Toy connection/
+
+# 迁移后的本地规划与历史讨论，保持原有不公开约定
+/docs/planning/
+/docs/archive/discussions/
+/docs/archive/APP_STRUCTURE_PLAN_20261003_before.md
+
+# 文档归档保持本地；运行app资源不忽略
+/docs/archive/

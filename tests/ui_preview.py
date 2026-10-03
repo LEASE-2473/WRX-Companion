@@ -7,10 +7,14 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['WRX_DB_PATH'] = str(Path(tempfile.mkdtemp(prefix='wrx-ui-')) / 'preview.sqlite3')
 
-from test_companion import FakeLlm
-from app import companion_core, companion_store, companion_routes, search, provider_store
+from tests.chat.test_companion import FakeLlm
+from app.chat import core as companion_core
+from app.chat import store as companion_store
+from app.chat import routes as companion_routes
+from app.search import service as search
+from app.providers import profiles as provider_store
 from app.models import SearchSettings, TtsProviderProfile
-from app.providers import wav_from_pcm
+from app.providers.client import wav_from_pcm
 from app.main import app
 
 

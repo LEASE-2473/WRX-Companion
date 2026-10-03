@@ -45,10 +45,11 @@ class TokenUsage(BaseModel):
     output_tokens: int | None = None
 
 class StoredMessage(ChatMessage):
+    image_count: int = 0
     id: str
-    timestamp: str
-    timezone: str = "Asia/Shanghai"
-    local_datetime: str
+    timestamp: str = ""
+    timezone: str = Field(default="Asia/Shanghai", exclude=True)
+    local_datetime: str = Field(default="", exclude=True)
     source: str = "web"
     request_id: str | None = None
     usage: TokenUsage | None = None
