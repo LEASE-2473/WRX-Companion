@@ -118,6 +118,7 @@ class TextTurn(BaseModel):
     search_mode: Literal["AUTO", "ON", "OFF"] = "AUTO"
 
 class ConversationRecord(BaseModel):
+    message_count: int = 0
     id: str
     name: str
     created_at: str

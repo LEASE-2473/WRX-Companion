@@ -139,9 +139,11 @@ def new_conversation(value: ConversationCreate | None = None):
 
 
 @router.get("/api/conversations/{cid}")
-def conversation(cid: str):
+def conversation(cid: str, message_limit: int | None = None):
     try:
-        return store.get_conversation(cid)
+        if message_limit is not None and not 1 <= message_limit <= 100000:
+            raise ValueError('网页消息条数必须为1–100000')
+        return store.get_conversation(cid, message_limit=message_limit)
     except (ValueError, KeyError) as exc:
         raise api_error(exc) from exc
 

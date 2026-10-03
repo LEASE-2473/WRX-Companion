@@ -14,6 +14,8 @@ cd WRX-Companion
 
 启动脚本自动创建虚拟环境并安装依赖，打开 http://127.0.0.1:2473 。文字聊天需在「模型与语音」配置 LLM 地址、Key 和模型；朗读另需 TTS 配置。
 
+`start_companion.bat` 是唯一启动脚本，会创建虚拟环境、首次安装依赖并启动应用。
+
 也可以手动启动（Windows）：
 
 ```powershell

@@ -30,8 +30,7 @@
 | [pytest.ini](../pytest.ini) | 仅收集tests目录的测试配置 |
 | [README.md](../README.md) | 项目介绍、部署与文档导航入口 |
 | [requirements.txt](../requirements.txt) | 主应用及设备工具统一Python依赖 |
-| [start_companion.bat](../start_companion.bat) | 用户双击启动入口，调用start_voice_agent.bat |
-| [start_voice_agent.bat](../start_voice_agent.bat) | 历史文件名保留；创建环境、安装依赖并启动2473 FastAPI应用 |
+| [start_companion.bat](../start_companion.bat) | 唯一启动入口；创建环境、安装依赖并启动2473 FastAPI应用 |
 | [TODO.md](../TODO.md) | 尚未实现的当前待办 |
 
 ## app：按功能区域的全部运行文件

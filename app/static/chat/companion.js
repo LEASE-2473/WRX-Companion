@@ -4,6 +4,23 @@ let activeCharacterId = localStorage.activeCharacterId || 'default';
 let editingCharacterId = null;
 let pendingTextTurn = null;
 let conversationPolling = false;
+let webpageMessageLimit = Number(localStorage.getItem('webpageMessageLimit')) || 100;
+if (!Number.isInteger(webpageMessageLimit) || webpageMessageLimit < 1 || webpageMessageLimit > 100000) webpageMessageLimit = 100;
+const fullyLoadedConversations = new Set();
+function webpageMessages(rows) {
+  return fullyLoadedConversations.has(activeConversationId) ? rows : rows.slice(-webpageMessageLimit);
+}
+async function loadAllWebpageMessages() {
+  const cid = activeConversationId;
+  if (!confirm('历史消息过多，加载全部消息可能导致网页卡顿。是否确认加载？')) return;
+  const saved = await companionApi(`/api/conversations/${encodeURIComponent(cid)}`);
+  if (cid !== activeConversationId) return;
+  fullyLoadedConversations.add(cid);
+  const index = conversations.findIndex(c => c.id === cid);
+  if (index >= 0) conversations[index] = saved;
+  messages = saved.messages; renderConversation();
+}
+
 const localTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
 
 async function companionApi(url, body, method = 'GET') {
@@ -56,7 +73,8 @@ async function loadConversations() {
 
 async function persistConversation(conversationId = activeConversationId, unused = null, showState = true) {
   if (!conversationId) return;
-  const saved = await companionApi(`/api/conversations/${encodeURIComponent(conversationId)}`);
+  const limit = fullyLoadedConversations.has(conversationId) ? '' : `?message_limit=${webpageMessageLimit}`;
+  const saved = await companionApi(`/api/conversations/${encodeURIComponent(conversationId)}${limit}`);
   if (saved.character_id !== activeCharacterId) return saved;
   const index = conversations.findIndex(item => item.id === saved.id);
   if (index >= 0) conversations[index] = saved; else conversations.unshift(saved);
@@ -264,3 +282,15 @@ function setConversationState(message, kind = '') { $('conversationState').textC
 $('conversationSelect').onchange = event => { void switchConversation(event.target.value).catch(error => { renderConversationSelect(); setConversationState(error.message, 'dirty'); }); };
 $('newConversation').onclick = () => { void createConversation().catch(error => setConversationState(`新建失败：${error.message}`, 'dirty')); };
 $('toggleConversation').onclick = () => { conversationExpanded = !conversationExpanded; renderConversation(); };
+
+$('webpageMessageLimit').value = webpageMessageLimit;
+$('saveWebpageMessageLimit').onclick = reportTo('webpageMessageState', async () => {
+  const input = $('webpageMessageLimit');
+  if (!input.reportValidity()) return;
+  const value = Number(input.value);
+  if (!Number.isInteger(value) || value < 1 || value > 100000) throw new Error('请输入1–100000的整数');
+  localStorage.setItem('webpageMessageLimit', String(value)); webpageMessageLimit = value;
+  fullyLoadedConversations.clear();
+  await persistConversation(); renderConversation();
+  $('webpageMessageState').textContent = `已保存：网页默认载入最近 ${value} 条 message`;
+});

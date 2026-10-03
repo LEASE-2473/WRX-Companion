@@ -246,8 +246,18 @@ function renderConversation() {
     const description = document.createElement('p'); description.textContent = '说说今天发生的事，或继续一个你喜欢的话题。';
     empty.append(symbol, title, description); $('chat').append(empty);
   }
-  messages.forEach(message => $('chat').append(messageNode(message.role, message.content, message)));
-  $('conversationSummary').textContent = `${messages.length} 条消息 · 自动保存`;
+  const visible = webpageMessages(messages);
+  const total = Math.max(currentConversation()?.message_count || 0, messages.length);
+  const hidden = total - visible.length;
+  if (hidden > 0) {
+    const notice = document.createElement('div'); notice.className = 'hint';
+    const text = document.createElement('p'); text.textContent = `历史消息过多：共 ${total} 条，目前显示最近 ${visible.length} 条，另有 ${hidden} 条未加载。`;
+    const button = document.createElement('button'); button.textContent = '确认加载全部历史';
+    button.onclick = reportTo('conversationState', loadAllWebpageMessages);
+    notice.append(text, button); $('chat').append(notice);
+  }
+  visible.forEach(message => $('chat').append(messageNode(message.role, message.content, message)));
+  $('conversationSummary').textContent = `显示 ${visible.length} / ${total} 条消息 · 自动保存`;
   renderComposerUsage();
   $('toggleConversation').hidden = true;
   scrollChat();

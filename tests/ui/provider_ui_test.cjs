@@ -30,5 +30,29 @@ async function check(action, suffix) {
   await check('fetchModels()', 'models');
   await check('testLlmConnection()', 'connection');
   await check("testProvider('llm')", 'test');
+  const controls = {
+    memoryEmbeddingProfile: {value:'embed-1'}, memoryRerankProfile: {value:'rank-1'},
+    memoryVectorEnabled: {checked:true}, memoryRerankEnabled: {checked:true}, memoryVectorProviderState: {}
+  };
+  let saved;
+  const binding = { $: id => controls[id], providerApi: async (url, options) => {
+    assert.equal(url, '/api/role-memory/settings');
+    if (!options) return {diary_hour:9, presets:{diary:{prompt:'保留提示词'}}, vector:{threshold:0.42, max_results:7}};
+    saved = JSON.parse(options.body); return saved;
+  }};
+  vm.createContext(binding);
+  vm.runInContext(source.slice(source.indexOf('async function saveMemoryVectorModels('), source.indexOf('function editMemoryVectorProfile(')), binding);
+  await vm.runInContext('saveMemoryVectorModels()', binding);
+  assert.equal(saved.embedding_profile_id, 'embed-1');
+  assert.equal(saved.rerank_profile_id, 'rank-1');
+  assert.equal(saved.vector.enabled, true);
+  assert.equal(saved.vector.rerank_enabled, true);
+  assert.equal(saved.vector.threshold, 0.42);
+  assert.equal(saved.diary_hour, 9);
+  assert.equal(saved.presets.diary.prompt, '保留提示词');
+  controls.memoryEmbeddingProfile.value = '';
+  await assert.rejects(vm.runInContext('saveMemoryVectorModels()', binding), /请先选择向量化模型/);
+  controls.memoryEmbeddingProfile.value = 'embed-1'; controls.memoryRerankProfile.value = '';
+  await assert.rejects(vm.runInContext('saveMemoryVectorModels()', binding), /Rerank 模型/);
   console.log('Provider UI draft persistence checks passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

@@ -598,3 +598,21 @@ def test_scheduler_below_current_threshold_still_calls_model(llm, monkeypatch):
         assert calls == [conv.id]
         assert not store.heartbeat_logs(conv.id, 1)
     asyncio.run(scenario())
+
+
+def test_webpage_message_limit_keeps_latest_in_order_without_truncating_storage():
+    with TestClient(app) as client:
+        cid = client.post('/api/conversations', json={}).json()['id']
+        with store.database() as db:
+            for i in range(105):
+                store._insert_message(db, cid, store.new_message('user' if i % 2 == 0 else 'assistant', str(i), 'Asia/Shanghai', 'chat', None))
+        limited = client.get(f'/api/conversations/{cid}?message_limit=100').json()
+        assert limited['message_count'] == 105
+        assert len(limited['messages']) == 100
+        assert [m['content'] for m in limited['messages']] == [str(i) for i in range(5, 105)]
+        full = client.get(f'/api/conversations/{cid}').json()
+        assert len(full['messages']) == 105
+        assert len(store.get_conversation(cid).messages) == 105
+        listing = client.get('/api/conversations').json()
+        assert next(c for c in listing if c['id'] == cid)['message_count'] == 105
+        assert client.get(f'/api/conversations/{cid}?message_limit=0').status_code == 422

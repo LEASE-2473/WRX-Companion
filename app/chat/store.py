@@ -156,14 +156,19 @@ def delete_character(cid):
         db.execute("DELETE FROM characters WHERE id=?", (cid,))
 
 
-def _conversation(db, cid, include_messages=True):
+def _conversation(db, cid, include_messages=True, message_limit=None):
     row = db.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not row:
         raise KeyError("会话不存在")
     data = dict(row)
     data["heartbeat"] = json.loads(data["heartbeat"])
-    data["messages"] = [dict(json.loads(m["document"]), id=m["id"], request_id=m["request_id"], role=m["role"], timezone=data["timezone"], local_datetime="") for m in db.execute(
-        "SELECT id,origin_id,request_id,role,document FROM messages WHERE conversation_id=? ORDER BY sequence", (cid,))] if include_messages else []
+    data['message_count'] = db.execute('SELECT count(*) FROM messages WHERE conversation_id=?', (cid,)).fetchone()[0]
+    query = 'SELECT id,origin_id,request_id,role,document FROM messages WHERE conversation_id=? ORDER BY sequence'
+    args = (cid,)
+    if message_limit is not None:
+        query = 'SELECT * FROM (SELECT sequence,id,origin_id,request_id,role,document FROM messages WHERE conversation_id=? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence'
+        args = (cid, message_limit)
+    data["messages"] = [dict(json.loads(m["document"]), id=m["id"], request_id=m["request_id"], role=m["role"], timezone=data["timezone"], local_datetime="") for m in db.execute(query, args)] if include_messages else []
     from app.chat import images as image_store
     for item in data['messages']:
         item['images'] = image_store.urls(db, item['id'])
@@ -178,9 +183,9 @@ def _conversation(db, cid, include_messages=True):
     return ConversationRecord.model_validate(data)
 
 
-def get_conversation(cid):
+def get_conversation(cid, message_limit=None):
     with database() as db:
-        return _conversation(db, cid)
+        return _conversation(db, cid, message_limit=message_limit)
 
 
 def list_conversations(character_id=None):

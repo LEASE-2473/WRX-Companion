@@ -23,6 +23,7 @@ async function load() {
   $('keyInput').value = formatHotkey(key);
   setKeyState(`当前生效：${formatHotkey(key)}（无需重启）`, 'saved');
   renderAllProviderProfiles();
+  await memoryVectorAction(loadMemoryVectorModels);
   setPromptState('当前服务端 Preset 已载入，将用于下一轮', 'saved');
 }
 
@@ -320,8 +321,54 @@ function renderProviderProfiles(kind, selectedId = null) {
   providerCollection(kind).forEach(profile => { const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.name; select.appendChild(option); });
   select.value = selectedId || settings.provider_profiles[providerActiveKey(kind)] || providerCollection(kind)[0]?.id || '';
   fillProvider(kind);
+  if (kind === 'llm') renderMemoryVectorProfiles();
 }
 function renderAllProviderProfiles() { ['llm', 'stt', 'tts'].forEach(kind => renderProviderProfiles(kind)); }
+function renderMemoryVectorProfiles() {
+  for (const [purpose, id] of [['embedding', 'memoryEmbeddingProfile'], ['rerank', 'memoryRerankProfile']]) {
+    const select = $(id), selected = select.value;
+    select.replaceChildren();
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = '未选择模型'; select.append(empty);
+    providerCollection('llm').filter(p => p.purpose === purpose).forEach(p => {
+      const option = document.createElement('option'); option.value = p.id; option.textContent = `${p.name} · ${p.model || '尚未填写模型名'}`; select.append(option);
+    });
+    select.value = selected;
+  }
+}
+async function loadMemoryVectorModels() {
+  const config = await providerApi('/api/role-memory/settings');
+  renderMemoryVectorProfiles();
+  $('memoryEmbeddingProfile').value = config.embedding_profile_id || '';
+  $('memoryRerankProfile').value = config.rerank_profile_id || '';
+  $('memoryVectorEnabled').checked = config.vector.enabled;
+  $('memoryRerankEnabled').checked = config.vector.rerank_enabled;
+  $('memoryVectorProviderState').textContent = '已读取当前记忆向量配置';
+}
+async function saveMemoryVectorModels() {
+  const embedding = $('memoryEmbeddingProfile').value, rerank = $('memoryRerankProfile').value;
+  const enabled = $('memoryVectorEnabled').checked, rerankEnabled = $('memoryRerankEnabled').checked;
+  if (enabled && !embedding) throw new Error('请先选择向量化模型');
+  if (rerankEnabled && (!enabled || !rerank)) throw new Error('启用精排需要启用向量召回并选择 Rerank 模型');
+  const config = await providerApi('/api/role-memory/settings');
+  config.embedding_profile_id = embedding || null; config.rerank_profile_id = rerank || null;
+  config.vector.enabled = enabled; config.vector.rerank_enabled = rerankEnabled;
+  await providerApi('/api/role-memory/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)});
+  $('memoryVectorProviderState').textContent = '已保存，日记、系统记忆与外部世界书从下一轮使用此配置；更换模型后需更新已有冷记忆向量';
+}
+function editMemoryVectorProfile(purpose, create = false) {
+  const id = $(purpose === 'embedding' ? 'memoryEmbeddingProfile' : 'memoryRerankProfile').value;
+  if (create) {
+    newProvider('llm'); $('llmPurpose').value = purpose;
+    $('llmName').value = purpose === 'embedding' ? '新向量化模型' : '新 Rerank 模型';
+  } else {
+    if (!id) throw new Error('请先选择模型，或点击新建');
+    renderProviderProfiles('llm', id);
+  }
+  const group = $('llmProfile').closest('.provider-group'); group.open = true; group.scrollIntoView({block:'start', behavior:'smooth'});
+}
+function memoryVectorAction(fn) {
+  return Promise.resolve().then(fn).catch(error => { $('memoryVectorProviderState').textContent = error.message; });
+}
 async function providerApi(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Provider 操作失败'); return payload; }
 async function activateProvider(kind, profileId) { if (!profileId) return; settings.provider_profiles = await providerApi(`/api/provider-profiles/active/${kind}/select`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId }) }); renderProviderProfiles(kind, profileId); providerState(kind, '已切换，将从下一轮开始生效', 'saved'); }
 function newProvider(kind) {
@@ -364,6 +411,7 @@ function openManagerPanel(panelId) {
   const panel = $(panelId);
   if (!panel || panel.open || panel.inert) return;
   panel.showModal();
+  if (panelId === 'providerPanel') void memoryVectorAction(loadMemoryVectorModels);
 }
 document.querySelectorAll('[data-open-panel]').forEach(button => { button.onclick = () => openManagerPanel(button.dataset.openPanel); });
 document.querySelectorAll('[data-close-panel]').forEach(button => { button.onclick = () => $(button.dataset.closePanel).close(); });
@@ -447,3 +495,11 @@ $('llmFetchedModels').onchange = event => { if (!event.target.value) return; $('
 $('llmModel').oninput = event => { const select = $('llmFetchedModels'); if (!select.disabled) select.value = [...select.options].some(option => option.value === event.target.value.trim()) ? event.target.value.trim() : ''; };
 $('testLlmProfile').onclick = () => void testLlmConnection().catch(error => providerState('llm', error.message, 'dirty')); $('testLlmGeneration').onclick = () => void testProvider('llm').catch(error => providerState('llm', error.message, 'dirty')); $('testSttProfile').onclick = () => void testProvider('stt').catch(error => providerState('stt', error.message, 'dirty')); $('testTtsProfile').onclick = () => void testProvider('tts').catch(error => providerState('tts', error.message, 'dirty')); $('fetchLlmModels').onclick = () => void fetchModels().catch(error => providerState('llm', error.message, 'dirty'));
 window.addEventListener('DOMContentLoaded', () => void load().catch(error => setConversationState(error.message, 'dirty')));
+
+$('saveMemoryVectorModels').onclick = () => void memoryVectorAction(saveMemoryVectorModels);
+$('reloadMemoryVectorModels').onclick = () => void memoryVectorAction(loadMemoryVectorModels);
+for (const purpose of ['embedding', 'rerank']) {
+  const suffix = purpose === 'embedding' ? 'EmbeddingProfile' : 'RerankProfile';
+  $('new' + suffix).onclick = () => void memoryVectorAction(() => editMemoryVectorProfile(purpose, true));
+  $('edit' + suffix).onclick = () => void memoryVectorAction(() => editMemoryVectorProfile(purpose));
+}

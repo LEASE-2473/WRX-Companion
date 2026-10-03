@@ -48,3 +48,26 @@ assert.equal(definitions.get('persistConversation'), '/static/chat/companion.js'
 assert.equal(definitions.get('sendTypedText'), '/static/chat/chat-ui.js');
 assert.equal(definitions.get('start'), '/static/voice/voice-ui.js');
 console.log(`Page boot passed: ${urls.length} scripts; unique global functions; voice/chat controls wired.`);
+
+// 网页条数按单条message截取，确认取消不请求全部历史。
+vm.runInContext(`
+  activeConversationId = 'limit-test';
+  webpageMessageLimit = 100;
+  messages = Array.from({length:105}, (_,i) => ({id:String(i), content:String(i)}));
+`, context);
+assert.equal(vm.runInContext('webpageMessages(messages).length', context), 100);
+assert.equal(vm.runInContext('webpageMessages(messages)[0].id', context), '5');
+context.confirm = () => false;
+(async () => {
+  await vm.runInContext('loadAllWebpageMessages()', context);
+  assert.equal(vm.runInContext('fullyLoadedConversations.has(activeConversationId)', context), false);
+  context.confirm = () => true;
+  context.fetch = async url => {
+    assert.equal(url, '/api/conversations/limit-test');
+    return {ok:true, json:async () => ({id:'limit-test', messages:Array.from({length:105}, (_,i) => ({id:String(i)}))})};
+  };
+  vm.runInContext('renderConversation = () => {};', context);
+  await vm.runInContext('loadAllWebpageMessages()', context);
+  assert.equal(vm.runInContext('webpageMessages(messages).length', context), 105);
+  console.log('Webpage message limit and confirmation checks passed');
+})().catch(error => {console.error(error); process.exitCode = 1;});
