@@ -287,6 +287,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | [tests/memory/test_memory_schema.py](../tests/memory/test_memory_schema.py) | 显式记忆列、来源标签、向量及旧JSON结构迁移回归 |
 | [tests/memory/test_prompt_files.py](../tests/memory/test_prompt_files.py) | 运行提示词读取、页面写回和SQLite不保存副本回归 |
 | [tests/memory/test_role_memory.py](../tests/memory/test_role_memory.py) | 角色作用域、冷热、记忆配置与独立日记回归 |
+| [tests/memory/test_system_bulk_cold.py](../tests/memory/test_system_bulk_cold.py) | 离线回归：system_bulk_cold |
 | [tests/memory/test_system_four_tables.py](../tests/memory/test_system_four_tables.py) | 物理四表、自增序号、向量BLOB、旧表名迁移回归 |
 | [tests/memory/test_system_memory.py](../tests/memory/test_system_memory.py) | 系统填表、追溯、自动窗口、冷记录与角色共享回归 |
 | [tests/prompting/__init__.py](../tests/prompting/__init__.py) | 测试包标记 |

@@ -511,6 +511,12 @@
     ]
   ],
   [
+    "/api/system-memory/{character_id}/bulk-cold",
+    [
+      "post"
+    ]
+  ],
+  [
     "/api/system-memory/{character_id}/cancel",
     [
       "post"
@@ -518,6 +524,12 @@
   ],
   [
     "/api/system-memory/{character_id}/scan",
+    [
+      "post"
+    ]
+  ],
+  [
+    "/api/system-memory/{character_id}/vector-selection",
     [
       "post"
     ]

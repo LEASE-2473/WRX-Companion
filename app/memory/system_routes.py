@@ -1,5 +1,6 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 from app.memory import system as memory
 from app.common.errors import api_error
 
@@ -43,6 +44,23 @@ def records(character_id: str, conversation_id: str):
             jobs=[dict(r) for r in db.execute('SELECT * FROM system_memory_batches WHERE character_id=? ORDER BY range_start DESC LIMIT 30',(character_id,))]
         return {'rows':rows,'progress':memory._progress.get(character_id),'batches':jobs}
     except (ValueError,KeyError) as exc: raise api_error(exc)
+
+class VectorRangeInput(ScanInput):
+    kinds: list[Literal['summary','person','item','agreement']] = Field(min_length=1,max_length=4)
+
+@router.post('/{character_id}/vector-selection')
+def vector_selection(character_id:str,value:VectorRangeInput):
+    try:
+        from app.memory.role import settings as role_settings
+        config=role_settings().vector
+        rows=memory.vector_selection(character_id,value.conversation_id,value.start,value.end,value.kinds)
+        return {'selected':len(rows),'pending':sum(not memory.vector_ready(r,config) for r in rows),'already_cold':sum(r['mode']=='cold' for r in rows)}
+    except (ValueError,KeyError) as exc:raise api_error(exc)
+
+@router.post('/{character_id}/bulk-cold')
+async def bulk_cold(character_id:str,value:VectorRangeInput):
+    try:return await memory.bulk_cold(character_id,value.conversation_id,value.start,value.end,value.kinds)
+    except (ValueError,KeyError) as exc:raise api_error(exc)
 
 @router.post('/{character_id}/scan')
 async def scan(character_id: str,value: ScanInput):

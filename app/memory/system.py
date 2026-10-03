@@ -214,7 +214,8 @@ async def change_mode(character_id,cid,rid,mode):
     if mode=='cold':
         config=memory.settings().vector
         if not config.enabled: raise ValueError('请先启用并配置向量记忆')
-        vector=(await memory.get_embeddings([text(row)],config))[0]; signature=memory.signature(config)
+        vector=row['vector'] if vector_ready(row,config) else (await memory.get_embeddings([text(row)],config))[0]
+        signature=memory.signature(config)
     with store.database() as db:
         table,sequence=schema.locate(rid)
         current=db.execute(f'SELECT * FROM {table} WHERE sequence=? AND character_id=?',(sequence,character_id)).fetchone()
@@ -224,6 +225,37 @@ async def change_mode(character_id,cid,rid,mode):
 def vector_ready(row,config):
     from app.memory.role import signature
     return bool(row.get('vector')) and row['vector_signature']==signature(config)
+
+
+def vector_selection(character_id,cid,start,end,kinds):
+    conv=store.get_conversation(cid)
+    if conv.character_id!=character_id:raise ValueError('角色与会话不匹配')
+    start,end=parse_time(start,conv.timezone),parse_time(end,conv.timezone)
+    if end<=start:raise ValueError('结束时间必须晚于开始时间')
+    if not kinds or set(kinds)-set(schema.TABLES):raise ValueError('请选择有效的系统表')
+    selected=[]
+    with store.database() as db:
+        initialize(db)
+        for kind in dict.fromkeys(kinds):
+            table=schema.TABLES[kind]
+            selected.extend(schema.decode(kind,r) for r in db.execute(f'SELECT * FROM {table} WHERE character_id=? AND julianday(range_start)<julianday(?) AND julianday(range_end)>julianday(?) ORDER BY range_start,sequence',(character_id,utc_seconds(end),utc_seconds(start))))
+    return selected
+
+async def bulk_cold(character_id,cid,start,end,kinds):
+    from app.memory import role as memory
+    selected=vector_selection(character_id,cid,start,end,kinds)
+    cfg=memory.settings().vector
+    if selected and not cfg.enabled:raise ValueError('请先启用并配置向量记忆')
+    result={'selected':len(selected),'converted':0,'reindexed':0,'skipped':0,'failed':0,'errors':[]}
+    for row in selected:
+        if row['mode']=='cold' and vector_ready(row,cfg):
+            result['skipped']+=1;continue
+        try:
+            await change_mode(character_id,cid,row['id'],'cold')
+            result['reindexed' if row['mode']=='cold' else 'converted']+=1
+        except Exception as exc:
+            result['failed']+=1;result['errors'].append({'id':row['id'],'error':str(exc)[:300]})
+    return result
 
 async def maintenance():
     config=settings()
