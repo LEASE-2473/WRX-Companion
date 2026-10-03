@@ -1,5 +1,7 @@
 from app.providers.diagnostics import safe_provider_detail as _safe_provider_detail
 import base64
+from app.models import VectorMemoryConfig
+from app.memory.vector_store import fetch_vector_models, _rerank_url
 from fastapi import HTTPException
 from app.models import ProviderActiveUpdate
 from app.voice.pipeline import describe_exception
@@ -12,7 +14,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 def _provider_kind(kind: str) -> str:
-    if kind not in {"stt", "llm", "tts"}:
+    if kind not in {"stt", "llm", "tts", "embedding", "rerank"}:
         raise HTTPException(status_code=404, detail="Unknown provider kind")
     return kind
 
@@ -33,6 +35,11 @@ def _probe_failure(detail: str) -> dict:
 def _configuration_problem(kind: str, profile, *, require_llm_model: bool = True) -> str:
     if kind == "llm":
         required = [("Base URL", profile.base_url), ("API Key", profile.api_key)]
+        if require_llm_model:
+            required.append(("Model", profile.model))
+        missing = [label for label, value in required if not str(value).strip()]
+    elif kind in {"embedding", "rerank"}:
+        required = [("API URL", profile.base_url)]
         if require_llm_model:
             required.append(("Model", profile.model))
         missing = [label for label, value in required if not str(value).strip()]
@@ -79,6 +86,10 @@ async def remove_provider_profile(kind: str, profile_id: str):
         mem=memory_settings()
         if profile_id in [emotion_settings().llm_profile_id,emotion_settings().contact_llm_profile_id] or any(p.llm_profile_id==profile_id for p in mem.presets.values()) or profile_id in [mem.embedding_profile_id,mem.rerank_profile_id]:
             raise HTTPException(status_code=409,detail='该Profile被角色状态或角色记忆使用，请先解除绑定')
+    if kind in {'embedding', 'rerank'}:
+        from app.memory.role import settings as memory_settings
+        if getattr(memory_settings(), kind + '_profile_id') == profile_id:
+            raise HTTPException(status_code=409, detail='该模型正被记忆使用，请先解除绑定')
     if kind == "llm" and any(char.llm_profile_id == profile_id for char in companion_store.list_characters()):
         raise HTTPException(status_code=409, detail="该 LLM 已绑定角色，请先解除角色绑定")
     if kind == "tts" and any(char.tts_profile_id == profile_id for char in companion_store.list_characters()):
@@ -122,13 +133,6 @@ async def test_llm_provider(profile_id: str):
         problem = _configuration_problem("llm", profile)
         if problem:
             return _configuration_failure(problem)
-        if profile.purpose in {'embedding','rerank'}:
-            from app.memory.vector_store import get_embeddings, get_rerank_scores
-            from app.models import VectorMemoryConfig
-            config = VectorMemoryConfig(api_url=profile.base_url, api_key=profile.api_key, model=profile.model, rerank_url=profile.base_url.rstrip('/') if profile.base_url.rstrip('/').endswith('/rerank') else profile.base_url.rstrip('/')+'/rerank', rerank_key=profile.api_key, rerank_model=profile.model)
-            if profile.purpose == 'embedding': await get_embeddings(['连接测试'], config)
-            else: await get_rerank_scores('测试',['连接测试'],config)
-            return {"ok":True,"stages":{"real_request":{"status":"passed","detail":profile.purpose+" 请求成功"}}}
         delta = await test_llm_stream(profile)
         return {"ok": True, "sample": delta[:80], "stages": {"configuration": {"status": "passed"}, "network_auth": {"status": "passed"}, "real_request": {"status": "passed", "detail": "已收到流式正文增量"}}}
     except Exception as exc:
@@ -168,3 +172,48 @@ async def test_tts_provider(profile_id: str):
     except Exception as exc:
         secret = getattr(locals().get("profile"), "api_key", "")
         return _probe_failure(_safe_provider_detail(exc, secret))
+
+
+@router.post('/api/provider-profiles/{kind}/{profile_id}/models')
+@router.post('/api/provider-profiles/{kind}/{profile_id}/connection')
+async def vector_provider_models(kind: str, profile_id: str):
+    if kind not in {'embedding', 'rerank'}:
+        raise HTTPException(status_code=404, detail='该类型不支持模型列表')
+    try:
+        try:
+            profile = get_profile(kind, profile_id)
+        except KeyError:
+            return _configuration_failure('该 Profile 尚未保存或已被删除', models=True)
+        problem = _configuration_problem(kind, profile, require_llm_model=False)
+        if problem:
+            return _configuration_failure(problem, models=True)
+        models = await fetch_vector_models(profile.base_url, profile.api_key, profile.models_url)
+        return {'ok':True, 'models':models, 'stages':{'configuration':{'status':'passed'}, 'network_auth':{'status':'passed'}, 'models':{'status':'passed', 'count':len(models)}}}
+    except Exception as exc:
+        detail = _safe_provider_detail(exc, getattr(locals().get('profile'), 'api_key', ''))
+        return {'ok':False, 'models':[], 'stages':{'configuration':{'status':'passed'}, 'network_auth':{'status':'failed', 'detail':detail}, 'models':{'status':'not_completed'}}}
+
+
+@router.post('/api/provider-profiles/{kind}/{profile_id}/test')
+async def test_vector_provider(kind: str, profile_id: str):
+    if kind not in {'embedding', 'rerank'}:
+        raise HTTPException(status_code=404, detail='Unknown provider kind')
+    try:
+        try:
+            profile = get_profile(kind, profile_id)
+        except KeyError:
+            return _configuration_failure('该 Profile 尚未保存或已被删除')
+        problem = _configuration_problem(kind, profile)
+        if problem:
+            return _configuration_failure(problem)
+        if kind == 'embedding':
+            config = VectorMemoryConfig(api_url=profile.base_url, api_key=profile.api_key, model=profile.model)
+            vector = (await get_embeddings(['向量连接测试'], config))[0]
+            detail = f'Embedding请求成功：{len(vector)}维向量'
+        else:
+            config = VectorMemoryConfig(rerank_url=_rerank_url(profile.base_url), rerank_key=profile.api_key, rerank_model=profile.model)
+            scores = await get_rerank_scores('连接测试', ['连接测试', '其他文档'], config)
+            detail = f'Rerank请求成功：{len(scores)}条评分'
+        return {'ok':True, 'stages':{'configuration':{'status':'passed'}, 'network_auth':{'status':'passed'}, 'real_request':{'status':'passed', 'detail':detail}}}
+    except Exception as exc:
+        return _probe_failure(_safe_provider_detail(exc, getattr(locals().get('profile'), 'api_key', '')))

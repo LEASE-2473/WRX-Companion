@@ -8,7 +8,7 @@
   document.querySelector('[data-open-panel="promptPanel"]').parentElement.append(entry);
   const body = dialog.querySelector('#memoryBody'), status = dialog.querySelector('#memoryStatus');
   let tab = 'general', config, data, characterId, conversationId, profiles = [];
-  const profileOptions = purpose => [['','未选择（独立任务需指定模型）'], ...profiles.filter(p => (p.purpose || 'chat') === purpose).map(p => [p.id,p.name])];
+  const profileOptions = purpose => [['','未选择（独立任务需指定模型）'], ...(purpose === 'chat' ? profiles : settings.provider_profiles[purpose + '_profiles'] || []).map(p => [p.id,p.name])];
   const node = (tag, text, parent = body) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; parent.append(n); return n; };
   const button = (text, fn, parent = body) => { const n = node('button', text, parent); n.type = 'button'; n.onclick = () => action(fn); return n; };
   const field = (label, value, onChange, type = 'text', parent = body) => {

@@ -56,13 +56,13 @@
       field('允许对话模型暂时沉默',config.allow_silence,v=>config.allow_silence=v,'checkbox',s);
       field('情绪理解提示词（Gemini版本可粘贴到这里）',config.chat_prompt,v=>config.chat_prompt=v,'textarea',s);
       s=section('情绪管家 · 每次转为冷却仅总结一次');field('启用转冷总结（会调用模型）',config.summary_enabled,v=>config.summary_enabled=v,'checkbox',s);
-      select('使用的 LLM Profile',config.llm_profile_id,[['','跟随当前会话 LLM'],...profiles.filter(p=>(p.purpose||'chat')==='chat').map(p=>[p.id,p.name])],v=>config.llm_profile_id=v||null,s);
+      select('使用的 LLM Profile',config.llm_profile_id,[['','跟随当前会话 LLM'],...profiles.map(p=>[p.id,p.name])],v=>config.llm_profile_id=v||null,s);
       button('去模型与语音管理 Profile',async()=>{dialog.close();renderAllProviderProfiles();document.getElementById('providerPanel').showModal();},s);
       field('总结读取最近消息条数',config.history_limit,v=>config.history_limit=v,'number',s);field('情绪状态总结提示词',config.summary_prompt,v=>config.summary_prompt=v,'textarea',s);
       field('一键评估提示词',config.assessment_prompt,v=>config.assessment_prompt=v,'textarea',s);
       node('p','聊天变化项没有1–2项限制，可以同时更新全部11项；一键评估全量填写目标强度，转冷总结仍只填方向与程度。固定协议由后端附加。',s).className='hint';
       s=section('时间演算与主动联系参数');
-      select('主动联系 LLM Profile',config.contact_llm_profile_id,[['','跟随当前会话 LLM'],...profiles.filter(p=>(p.purpose||'chat')==='chat').map(p=>[p.id,p.name])],v=>config.contact_llm_profile_id=v||null,s);
+      select('主动联系 LLM Profile',config.contact_llm_profile_id,[['','跟随当前会话 LLM'],...profiles.map(p=>[p.id,p.name])],v=>config.contact_llm_profile_id=v||null,s);
       for(const [key,label]of [['state_hours','管家状态有效期（小时）'],['step_per_hour','每级状态变化 / 小时'],['recovery_per_hour','到期后恢复 / 小时'],['longing_per_hour','冷却思念增长 / 小时'],['contact_weight','思念联系权重'],['worry_weight','担忧关心权重'],['retreat_weight','生气与低落退缩权重'],['no_action_minutes','两次主动判断最小间隔（分钟）']])field(label,config[key],v=>config[key]=v,'number',s);
       node('p',`联系 = ${config.contact_weight}×思念 + 0.2×爱意 − ${config.retreat_weight}×(生气+低落)；关心 = ${config.worry_weight}×担忧 − 0.1×低落；修复 = 0.8×内疚 + 0.2×爱意 − 0.2×生气；分享 = 0.7×欣喜 + 0.3×期待 − 0.2×低落。各动机限制到0–100，仅供面板参考。心跳将情绪与聊天交给AI自主判断联系或沉默，不使用动机阈值。`,s).className='hint';
       node('p','聊天期间不做默认恢复。转冷后有效状态按方向×程度×每级速度推进；到期才恢复。思念在无有效状态时累积。配置是实验初值，可调整。',s).className='hint';button('保存角色状态设置',save);

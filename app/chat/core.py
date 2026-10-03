@@ -71,8 +71,6 @@ class CompanionCore:
             if not profiles.active_llm_profile_id:
                 raise ValueError("请先保存并启用 LLM Profile")
             profile = get_profile("llm", profiles.active_llm_profile_id)
-        if profile.purpose != 'chat':
-            raise ValueError('会话必须使用对话用途 Profile')
         if not profile.api_key.strip() or not profile.model.strip():
             raise ValueError("当前 LLM Profile 缺少 API Key 或 Model")
         return OpenAICompatibleLlm(profile)

@@ -283,7 +283,22 @@ class LlmProviderProfile(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = ""
-    purpose: Literal['chat','embedding','rerank'] = 'chat'
+
+class EmbeddingProviderProfile(BaseModel):
+    id: str
+    name: str
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    models_url: str = ""
+
+class RerankProviderProfile(BaseModel):
+    id: str
+    name: str
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    models_url: str = ""
 
 class TtsProviderProfile(BaseModel):
     id: str
@@ -300,13 +315,45 @@ class TtsProviderProfile(BaseModel):
     speed_ratio: float = 1.0
 
 class ProviderProfilesState(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2
     stt_profiles: list[SttProviderProfile] = Field(default_factory=list)
     llm_profiles: list[LlmProviderProfile] = Field(default_factory=list)
     tts_profiles: list[TtsProviderProfile] = Field(default_factory=list)
+    embedding_profiles: list[EmbeddingProviderProfile] = Field(default_factory=list)
+    rerank_profiles: list[RerankProviderProfile] = Field(default_factory=list)
+    active_embedding_profile_id: str | None = None
+    active_rerank_profile_id: str | None = None
     active_stt_profile_id: str | None = None
     active_llm_profile_id: str | None = None
     active_tts_profile_id: str | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def migrate_vector_profiles(cls, raw):
+        if not isinstance(raw, dict):
+            return raw
+        data = dict(raw)
+        chat = []
+        for kind in ('embedding', 'rerank'):
+            data[kind + '_profiles'] = list(data.get(kind + '_profiles', []))
+        for profile in data.get('llm_profiles', []):
+            purpose = profile.get('purpose', 'chat') if isinstance(profile, dict) else getattr(profile, 'purpose', 'chat')
+            if purpose in ('embedding', 'rerank'):
+                doc = dict(profile) if isinstance(profile, dict) else profile.model_dump()
+                doc.pop('purpose', None)
+                doc.pop('provider_type', None)
+                collection = data[purpose + '_profiles']
+                if any((p.get('id') if isinstance(p, dict) else p.id) == doc['id'] for p in collection):
+                    raise ValueError('旧向量Profile与独立配置ID冲突，请先检查配置')
+                collection.append(doc)
+            else:
+                chat.append(profile)
+        data['llm_profiles'] = chat
+        ids = [p.get('id') if isinstance(p, dict) else p.id for p in chat]
+        if data.get('active_llm_profile_id') is not None and data['active_llm_profile_id'] not in ids:
+            data['active_llm_profile_id'] = ids[0] if ids else None
+        data['schema_version'] = 2
+        return data
 
 class ProviderActiveUpdate(BaseModel):
     profile_id: str

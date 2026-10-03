@@ -53,7 +53,10 @@ def settings():
     return memory.public_settings()
 @router.put('/settings')
 def save_settings(value: memory.MemorySettings):
-    return memory.save_settings(value.model_dump())
+    try:
+        return memory.save_settings(value.model_dump())
+    except (KeyError, ValueError) as exc:
+        raise api_error(exc)
 @router.get('/prompt-defaults')
 def prompt_defaults():
     return {k: {'prompt':p.prompt,'instant_prompt':p.instant_prompt} for k,p in memory.presets().items()}

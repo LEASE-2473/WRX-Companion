@@ -180,7 +180,7 @@ function editCharacter(character) {
   Object.entries(fields).forEach(([id, key]) => $(id).value = character[key] || '');
   characterOptions($('characterPreset'), settings.prompt_presets.presets, character.preset_id, '跟随当前预设');
   characterOptions($('characterLorebook'), settings.lorebooks.lorebooks, character.lorebook_id, '跟随当前世界书');
-  characterOptions($('characterLlm'), settings.provider_profiles.llm_profiles.filter(p => (p.purpose || 'chat') === 'chat'), character.llm_profile_id, '跟随当前 LLM');
+  characterOptions($('characterLlm'), settings.provider_profiles.llm_profiles, character.llm_profile_id, '跟随当前 LLM');
   characterOptions($('characterTts'), settings.provider_profiles.tts_profiles, character.tts_profile_id, '跟随当前 TTS');
   $('characterState').textContent = character.id ? '正在编辑当前角色' : '新角色尚未保存';
 }

@@ -24,7 +24,7 @@
     field('总结间隔（分钟）',config.interval_minutes,'number',grid,v=>config.interval_minutes=v);
     field('批次请求间隔（秒）',config.delay_seconds,'number',grid,v=>config.delay_seconds=v);
     node('p','系统记忆按角色共享，会话仅保留来源。',grid);
-    select('填表模型',config.llm_profile_id||'',[['','沿用日记任务模型'],...profiles.filter(p=>(p.purpose||'chat')==='chat').map(p=>[p.id,p.name])],grid,v=>config.llm_profile_id=v||null);
+    select('填表模型',config.llm_profile_id||'',[['','沿用日记任务模型'],...profiles.map(p=>[p.id,p.name])],grid,v=>config.llm_profile_id=v||null);
     field('第三人称填表提示词',config.prompt,'textarea',settings,v=>config.prompt=v);
     button('保存设置',async()=>{config=await api('/settings','PUT',config);},settings);
     const scan=node('section');node('h3','按显示时间追溯',scan);node('p','直接读取原始聊天，含开始、不含结束，不受聊天上下文过滤影响。默认角色范围涵盖该角色所有会话；每批提交成功后再处理下一批。',scan);

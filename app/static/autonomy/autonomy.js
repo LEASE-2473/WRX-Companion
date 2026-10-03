@@ -87,7 +87,7 @@
     node('p',cfg.archived ? '当前心跳仅决定主动发消息或保持沉默，不会触发任何旅行活动。' : '自动外出还需要本会话已开启心跳。手动旅行按钮可独立使用。',automatic);
     const persona = section('她出门时的样子'); field(persona,'公开人格（只写允许对外使用的角色设定）','public_personality','textarea'); field(persona,'她的兴趣','interests'); field(persona,'允许 Mastodon 自主留言（需要 write:statuses 权限）','allow_replies','checkbox');
     node('p','每次行动必须写活动笔记，写完才决定是否继续。外出模型不读取私聊、用户设定或私人记忆；禁止透露任何用户和工作信息。',persona);
-    const profiles = await providerApi('/api/provider-profiles'); select(persona,'外出使用的模型','llm_profile_id',[['','跟随当前会话'],...profiles.llm_profiles.filter(p => (p.purpose || 'chat') === 'chat').map(p => [p.id,p.name])]);
+    const profiles = await providerApi('/api/provider-profiles'); select(persona,'外出使用的模型','llm_profile_id',[['','跟随当前会话'],...profiles.llm_profiles.map(p => [p.id,p.name])]);
     const advanced = details(body,'旅行额度与网络设置'); const grid = node('div',undefined,advanced); grid.className = 'outing-grid';
     for(const [label,key] of [['自动冷却（分钟）','interval_minutes'],['每角色每日最多旅行次数','daily_limit'],['每次最多行动轮数（2–3）','max_steps'],['本次总输出 Token 上限','output_budget'],['自动安静开始小时','quiet_start'],['自动安静结束小时（相同则关闭）','quiet_end']]) field(grid,label,key,'number');
     field(advanced,'社区代理（可选，如 http://127.0.0.1:7890）','proxy_url'); field(advanced,'兼容正在运行的代理 Fake-IP','allow_fake_ip','checkbox'); node('p','是否需要代理取决于实例和网络。输出上限不含输入和供应商内部计费。',advanced);

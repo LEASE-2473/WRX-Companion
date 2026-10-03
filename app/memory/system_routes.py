@@ -24,7 +24,7 @@ def save_settings(value: memory.Settings):
         if value.scope not in ('character','conversation'): raise ValueError('无效绑定')
         if value.llm_profile_id:
             from app.providers.profiles import get_profile
-            if get_profile('llm',value.llm_profile_id).purpose!='chat': raise ValueError('填表请选择对话用途模型')
+            get_profile('llm',value.llm_profile_id)
         memory.prompt_files.write('system',value.prompt)
         memory.store.save_setting('system_memory',value.model_dump(exclude={'prompt'}))
         return value.model_dump()

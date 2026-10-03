@@ -294,26 +294,26 @@ async function loadVectorChunks(offset = vectorChunkOffset) {
 async function previewVectorImport(file) { const text = await file.text(); const separator = $('vectorSeparator').value || '---'; const name = $('vectorLibraryName').value.trim() || file.name.replace(/\.(jsonl|md|markdown|txt)$/i, ''); const report = await vectorApi('/api/vector-memory/import/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, filename: file.name, separator }) }); pendingVectorImport = { text, filename: file.name, separator, name }; $('vectorImportReport').textContent = JSON.stringify({ saved: false, name, ...report }, null, 2); $('confirmVectorImport').disabled = false; $('confirmVectorImport').textContent = '确认导入（暂不调用模型）'; $('vectorImportDialog').showModal(); }
 async function confirmVectorImport() { if (!pendingVectorImport) return; const result = await vectorApi('/api/vector-memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingVectorImport) }); settings.vector_memory = result.state; renderVectorMemory(); $('vectorImportReport').textContent += '\n\n已保存切片；请回到向量管理页点击“开始/继续向量化”。'; $('confirmVectorImport').disabled = true; $('confirmVectorImport').textContent = '已导入'; pendingVectorImport = null; setVectorLibraryState('预切片已导入，尚未调用向量模型', 'saved'); }
 
-function providerCollection(kind) { return settings.provider_profiles[`${kind}_profiles`]; }
+function providerCollection(kind) { return settings.provider_profiles[`${kind}_profiles`] || []; }
 function providerActiveKey(kind) { return `active_${kind}_profile_id`; }
 function providerState(kind, message, state = '') { const node = $(`${kind}ProviderState`); node.textContent = message; node.className = `hint ${state}`.trim(); }
 function selectedProvider(kind) { return providerCollection(kind).find(item => item.id === $(`${kind}Profile`).value); }
 function setKeyPlaceholder(kind, profile) { const input = $(`${kind}ApiKey`); input.value = ''; input.placeholder = profile?.api_key_set ? '••••••••（已保存在本机；留空保持）' : '尚未保存 Key'; }
-function clearFetchedModels() { const select = $('llmFetchedModels'); select.innerHTML = '<option value="">点击“拉取模型”后在这里选择</option>'; select.disabled = true; }
-function renderFetchedModels(models) {
-  const select = $('llmFetchedModels'); const current = $('llmModel').value.trim(); select.innerHTML = '';
+function clearFetchedModels(kind = 'llm') { const select = $(`${kind}FetchedModels`); select.innerHTML = '<option value="">点击“拉取模型”后在这里选择</option>'; select.disabled = true; }
+function renderFetchedModels(models, kind = 'llm') {
+  const select = $(`${kind}FetchedModels`); const current = $(`${kind}Model`).value.trim(); select.innerHTML = '';
   const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = models.length ? `请选择模型（共 ${models.length} 个）` : '接口未返回模型'; select.appendChild(placeholder);
   models.forEach(model => { const option = document.createElement('option'); option.value = model; option.textContent = model; select.appendChild(option); });
   select.disabled = models.length === 0; select.value = models.includes(current) ? current : '';
 }
 function fillProvider(kind) {
   const profile = selectedProvider(kind);
-  if (!profile) { if (kind === 'llm') clearFetchedModels(); setKeyPlaceholder(kind, null); providerState(kind, '尚无 Profile，请新建并保存', 'dirty'); return; }
-  if (kind === 'llm') { if ($('llmPurpose')) $('llmPurpose').value = profile.purpose || 'chat'; $('llmName').value = profile.name; $('llmBaseUrl').value = profile.base_url; $('llmModel').value = profile.model; clearFetchedModels(); }
+  if (!profile) { if (['llm','embedding','rerank'].includes(kind)) { clearFetchedModels(kind); for (const suffix of ['Name','BaseUrl','Model']) $(`${kind}${suffix}`).value = ''; if (kind !== 'llm') $(`${kind}ModelsUrl`).value = ''; } setKeyPlaceholder(kind, null); providerState(kind, '尚无 Profile，请新建并保存', 'dirty'); return; }
+  if (['llm','embedding','rerank'].includes(kind)) { $(`${kind}Name`).value = profile.name; $(`${kind}BaseUrl`).value = profile.base_url; $(`${kind}Model`).value = profile.model; if (kind !== 'llm') $(`${kind}ModelsUrl`).value = profile.models_url || ''; clearFetchedModels(kind); }
   if (kind === 'stt') { $('sttName').value = profile.name; $('sttEndpoint').value = profile.endpoint; $('sttStreamEndpoint').value = profile.stream_endpoint; $('sttResourceId').value = profile.resource_id; $('sttTwoPass').checked = profile.stream_two_pass !== false; }
   if (kind === 'tts') { $('ttsName').value = profile.name; $('ttsProviderType').value = profile.provider_type || 'http'; $('ttsEndpoint').value = profile.endpoint; $('ttsResourceId').value = profile.resource_id; $('ttsVoiceType').value = profile.voice_type; $('ttsEmotion').value = profile.emotion || ''; $('ttsEnableEmotion').checked = Boolean(profile.enable_emotion); $('ttsEmotionScale').value = profile.emotion_scale ?? 4; $('ttsSpeedRatio').value = profile.speed_ratio ?? 1; $('ttsRequestTemplate').value = JSON.stringify(profile.request_template || {}, null, 2); }
   setKeyPlaceholder(kind, profile);
-  const active = settings.provider_profiles[providerActiveKey(kind)] === profile.id;
+  const active = ['llm','stt','tts'].includes(kind) && settings.provider_profiles[providerActiveKey(kind)] === profile.id;
   providerState(kind, active ? `当前全局启用：${profile.name}` : `已载入：${profile.name}`, active ? 'saved' : '');
 }
 function renderProviderProfiles(kind, selectedId = null) {
@@ -321,15 +321,15 @@ function renderProviderProfiles(kind, selectedId = null) {
   providerCollection(kind).forEach(profile => { const option = document.createElement('option'); option.value = profile.id; option.textContent = profile.name; select.appendChild(option); });
   select.value = selectedId || settings.provider_profiles[providerActiveKey(kind)] || providerCollection(kind)[0]?.id || '';
   fillProvider(kind);
-  if (kind === 'llm') renderMemoryVectorProfiles();
+  if (['embedding','rerank'].includes(kind)) renderMemoryVectorProfiles();
 }
-function renderAllProviderProfiles() { ['llm', 'stt', 'tts'].forEach(kind => renderProviderProfiles(kind)); }
+function renderAllProviderProfiles() { ['llm', 'tts', 'stt', 'embedding', 'rerank'].forEach(kind => renderProviderProfiles(kind)); }
 function renderMemoryVectorProfiles() {
   for (const [purpose, id] of [['embedding', 'memoryEmbeddingProfile'], ['rerank', 'memoryRerankProfile']]) {
     const select = $(id), selected = select.value;
     select.replaceChildren();
     const empty = document.createElement('option'); empty.value = ''; empty.textContent = '未选择模型'; select.append(empty);
-    providerCollection('llm').filter(p => p.purpose === purpose).forEach(p => {
+    providerCollection(purpose).forEach(p => {
       const option = document.createElement('option'); option.value = p.id; option.textContent = `${p.name} · ${p.model || '尚未填写模型名'}`; select.append(option);
     });
     select.value = selected;
@@ -337,6 +337,10 @@ function renderMemoryVectorProfiles() {
 }
 async function loadMemoryVectorModels() {
   const config = await providerApi('/api/role-memory/settings');
+  if (['embedding','rerank'].some(kind => config[kind + '_profile_id'] && !providerCollection(kind).some(p => p.id === config[kind + '_profile_id']))) {
+    settings.provider_profiles = await providerApi('/api/provider-profiles');
+    ['embedding','rerank'].forEach(kind => renderProviderProfiles(kind));
+  }
   renderMemoryVectorProfiles();
   $('memoryEmbeddingProfile').value = config.embedding_profile_id || '';
   $('memoryRerankProfile').value = config.rerank_profile_id || '';
@@ -355,30 +359,20 @@ async function saveMemoryVectorModels() {
   await providerApi('/api/role-memory/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)});
   $('memoryVectorProviderState').textContent = '已保存，日记、系统记忆与外部世界书从下一轮使用此配置；更换模型后需更新已有冷记忆向量';
 }
-function editMemoryVectorProfile(purpose, create = false) {
-  const id = $(purpose === 'embedding' ? 'memoryEmbeddingProfile' : 'memoryRerankProfile').value;
-  if (create) {
-    newProvider('llm'); $('llmPurpose').value = purpose;
-    $('llmName').value = purpose === 'embedding' ? '新向量化模型' : '新 Rerank 模型';
-  } else {
-    if (!id) throw new Error('请先选择模型，或点击新建');
-    renderProviderProfiles('llm', id);
-  }
-  const group = $('llmProfile').closest('.provider-group'); group.open = true; group.scrollIntoView({block:'start', behavior:'smooth'});
-}
-function memoryVectorAction(fn) {
-  return Promise.resolve().then(fn).catch(error => { $('memoryVectorProviderState').textContent = error.message; });
+function memoryVectorAction(fn, stateId = 'memoryVectorProviderState') {
+  return Promise.resolve().then(fn).then(() => { if (stateId !== 'memoryVectorProviderState') $(stateId).textContent = $('memoryVectorProviderState').textContent; }).catch(error => { $(stateId).textContent = error.message; });
 }
 async function providerApi(url, options = {}) { const response = await fetch(url, options); const payload = await response.json(); if (!response.ok) throw new Error(payload.detail || 'Provider 操作失败'); return payload; }
 async function activateProvider(kind, profileId) { if (!profileId) return; settings.provider_profiles = await providerApi(`/api/provider-profiles/active/${kind}/select`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId }) }); renderProviderProfiles(kind, profileId); providerState(kind, '已切换，将从下一轮开始生效', 'saved'); }
 function newProvider(kind) {
   const id = newIdentityId(id => providerCollection(kind).some(p => p.id === id));
-  const defaults = kind === 'llm' ? { id, name: '新 LLM Profile', provider_type: 'openai_compatible', base_url: 'https://api.openai.com/v1', api_key: '', api_key_set: false, model: '' } : kind === 'stt' ? { id, name: '新 STT Profile', provider_type: 'volcengine', endpoint: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream', stream_endpoint: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async', resource_id: '', api_key: '', api_key_set: false, stream_two_pass: true } : { id, name: '新 TTS Profile', provider_type: 'websocket', endpoint: 'wss://openspeech.bytedance.com/api/v3/tts/bidirection', resource_id: 'seed-tts-2.0', api_key: '', api_key_set: false, voice_type: '', request_template: {}, emotion: '', enable_emotion: false, emotion_scale: 4, speed_ratio: 1 };
+  const defaults = ['embedding','rerank'].includes(kind) ? {id, name: kind === 'embedding' ? '新向量化模型' : '新 Rerank 模型', base_url:'', api_key:'', api_key_set:false, model:'', models_url:''} : kind === 'llm' ? { id, name: '新 LLM Profile', provider_type: 'openai_compatible', base_url: 'https://api.openai.com/v1', api_key: '', api_key_set: false, model: '' } : kind === 'stt' ? { id, name: '新 STT Profile', provider_type: 'volcengine', endpoint: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream', stream_endpoint: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async', resource_id: '', api_key: '', api_key_set: false, stream_two_pass: true } : { id, name: '新 TTS Profile', provider_type: 'websocket', endpoint: 'wss://openspeech.bytedance.com/api/v3/tts/bidirection', resource_id: 'seed-tts-2.0', api_key: '', api_key_set: false, voice_type: '', request_template: {}, emotion: '', enable_emotion: false, emotion_scale: 4, speed_ratio: 1 };
   providerCollection(kind).push(defaults); renderProviderProfiles(kind, id); providerState(kind, '新 Profile 尚未保存', 'dirty');
 }
 function providerPayload(kind) {
   const current = selectedProvider(kind); if (!current) throw new Error('请先新建 Profile');
-  if (kind === 'llm') return { id: current.id, name: $('llmName').value.trim(), provider_type: 'openai_compatible', purpose: $('llmPurpose')?.value || 'chat', base_url: $('llmBaseUrl').value.trim(), api_key: $('llmApiKey').value, model: $('llmModel').value.trim() };
+  if (kind === 'llm') return { id: current.id, name: $('llmName').value.trim(), provider_type: 'openai_compatible', base_url: $('llmBaseUrl').value.trim(), api_key: $('llmApiKey').value, model: $('llmModel').value.trim() };
+  if (['embedding','rerank'].includes(kind)) return {id:current.id, name:$(`${kind}Name`).value.trim(), base_url:$(`${kind}BaseUrl`).value.trim(), api_key:$(`${kind}ApiKey`).value, model:$(`${kind}Model`).value.trim(), models_url:$(`${kind}ModelsUrl`).value.trim()};
   if (kind === 'stt') return { id: current.id, name: $('sttName').value.trim(), provider_type: 'volcengine', endpoint: $('sttEndpoint').value.trim(), stream_endpoint: $('sttStreamEndpoint').value.trim(), resource_id: $('sttResourceId').value.trim(), api_key: $('sttApiKey').value, stream_two_pass: $('sttTwoPass').checked };
   let requestTemplate; try { requestTemplate = JSON.parse($('ttsRequestTemplate').value || '{}'); } catch { throw new Error('TTS Request Template 不是合法 JSON'); }
   return { id: current.id, name: $('ttsName').value.trim(), provider_type: $('ttsProviderType').value, endpoint: $('ttsEndpoint').value.trim(), resource_id: $('ttsResourceId').value.trim(), api_key: $('ttsApiKey').value, voice_type: $('ttsVoiceType').value.trim(), request_template: requestTemplate, emotion: $('ttsEmotion').value.trim(), enable_emotion: $('ttsEnableEmotion').checked, emotion_scale: Number($('ttsEmotionScale').value) || 4, speed_ratio: Number($('ttsSpeedRatio').value) || 1 };
@@ -390,7 +384,7 @@ async function persistProviderDraft(kind) {
   renderProviderProfiles(kind, payload.id);
   return payload.id;
 }
-async function saveProvider(kind) { const profileId = await persistProviderDraft(kind); if (kind !== 'llm') await activateProvider(kind, profileId); }
+async function saveProvider(kind) { const profileId = await persistProviderDraft(kind); if (['stt','tts'].includes(kind)) await activateProvider(kind, profileId); else providerState(kind, 'Profile 已保存', 'saved'); }
 async function deleteProvider(kind) { const profile = selectedProvider(kind); if (!profile) return; settings.provider_profiles = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profile.id)}`, { method: 'DELETE' }); renderProviderProfiles(kind); providerState(kind, '已删除；当前选择已更新', 'saved'); }
 function formatProbe(result) { return Object.entries(result.stages || {}).map(([name, value]) => `${name}: ${value.status}${value.detail ? `（${value.detail}）` : ''}`).join('；'); }
 async function testLlmConnection() {
@@ -401,7 +395,7 @@ async function testLlmConnection() {
   providerState('llm', result.ok ? '连接检查成功：已获取模型列表；未调用模型，尚未验证生成能力' : formatProbe(result), result.ok ? 'saved' : 'dirty');
 }
 async function testProvider(kind) { const profileId = await persistProviderDraft(kind); providerState(kind, '正在执行真实最小请求…'); const result = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profileId)}/test`, { method: 'POST' }); providerState(kind, formatProbe(result), result.ok ? 'saved' : 'dirty'); if (kind === 'tts' && result.audio_base64) playAudio({ audio_base64: result.audio_base64, audio_mime: result.audio_mime, latency: {} }); }
-async function fetchModels() { const profileId = await persistProviderDraft('llm'); providerState('llm', '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/llm/${encodeURIComponent(profileId)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || []); providerState('llm', result.ok ? `已拉取 ${result.models.length} 个模型名称；仅查询列表，未调用模型` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
+async function fetchModels(kind = 'llm') { const profileId = await persistProviderDraft(kind); providerState(kind, '正在请求 /models…'); const result = await providerApi(`/api/provider-profiles/${kind}/${encodeURIComponent(profileId)}/models`, { method: 'POST' }); if (result.ok) renderFetchedModels(result.models || [], kind); providerState(kind, result.ok ? `已拉取 ${result.models.length} 个模型名称；仅查询列表，未调用模型` : formatProbe(result), result.ok ? 'saved' : 'dirty'); }
 
 
 
@@ -498,8 +492,15 @@ window.addEventListener('DOMContentLoaded', () => void load().catch(error => set
 
 $('saveMemoryVectorModels').onclick = () => void memoryVectorAction(saveMemoryVectorModels);
 $('reloadMemoryVectorModels').onclick = () => void memoryVectorAction(loadMemoryVectorModels);
-for (const purpose of ['embedding', 'rerank']) {
-  const suffix = purpose === 'embedding' ? 'EmbeddingProfile' : 'RerankProfile';
-  $('new' + suffix).onclick = () => void memoryVectorAction(() => editMemoryVectorProfile(purpose, true));
-  $('edit' + suffix).onclick = () => void memoryVectorAction(() => editMemoryVectorProfile(purpose));
+for (const kind of ['embedding', 'rerank']) {
+  const suffix = kind === 'embedding' ? 'Embedding' : 'Rerank';
+  $('new' + suffix + 'Profile').onclick = () => newProvider(kind);
+  $('delete' + suffix + 'Profile').onclick = () => void deleteProvider(kind).catch(e => providerState(kind, e.message, 'dirty'));
+  $('save' + suffix + 'Profile').onclick = () => void saveProvider(kind).catch(e => providerState(kind, e.message, 'dirty'));
+  $('fetch' + suffix + 'Models').onclick = () => void fetchModels(kind).catch(e => providerState(kind, e.message, 'dirty'));
+  $('test' + suffix + 'Profile').onclick = () => void testProvider(kind).catch(e => providerState(kind, e.message, 'dirty'));
+  $(kind + 'Profile').onchange = () => fillProvider(kind);
+  $(kind + 'FetchedModels').onchange = event => { if (event.target.value) $(kind + 'Model').value = event.target.value; };
 }
+
+$('saveEmbeddingBinding').onclick = () => void memoryVectorAction(saveMemoryVectorModels, 'embeddingMemoryState');

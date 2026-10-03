@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 from app.config import DATA_DIR, PROVIDER_PROFILES_FILE
-from app.models import LlmProviderProfile, ProviderProfilesState, SttProviderProfile, TtsProviderProfile
+from app.models import EmbeddingProviderProfile, RerankProviderProfile, LlmProviderProfile, ProviderProfilesState, SttProviderProfile, TtsProviderProfile
 
-ProviderKind = Literal["stt", "llm", "tts"]
+ProviderKind = Literal["stt", "llm", "tts", "embedding", "rerank"]
 
 
 def resolve_llm(conversation_id=None, profile_id=None):
@@ -21,8 +21,6 @@ def resolve_llm(conversation_id=None, profile_id=None):
     if not profile_id:
         raise ValueError('请在模型与语音中保存并选择 LLM Profile')
     profile = get_profile('llm', profile_id)
-    if profile.purpose != 'chat':
-        raise ValueError('对话或情绪任务必须选择对话用途的 LLM Profile')
     return profile
 
 
@@ -39,8 +37,8 @@ def load_provider_profiles(path: Path | None = None) -> ProviderProfilesState:
         return ProviderProfilesState()
     try:
         return ProviderProfilesState.model_validate_json(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ProviderProfilesState()
+    except (OSError, ValueError) as exc:
+        raise ValueError('模型配置文件无法读取或格式无效，已保留原文件，请检查配置') from exc
 
 
 def save_provider_profiles(state: ProviderProfilesState, path: Path | None = None) -> None:
@@ -61,10 +59,12 @@ def _active_name(kind: ProviderKind) -> str:
 
 
 def _profile_model(kind: ProviderKind):
-    return {"stt": SttProviderProfile, "llm": LlmProviderProfile, "tts": TtsProviderProfile}[kind]
+    return {"stt": SttProviderProfile, "llm": LlmProviderProfile, "tts": TtsProviderProfile, "embedding": EmbeddingProviderProfile, "rerank": RerankProviderProfile}[kind]
 
 
 def upsert_provider_profile(kind: ProviderKind, value: dict, path: Path | None = None) -> ProviderProfilesState:
+    if kind == 'llm' and value.get('purpose', 'chat') != 'chat':
+        raise ValueError('Embedding和Rerank必须保存到各自独立的模型配置')
     state = load_provider_profiles(path)
     collection = getattr(state, _collection_name(kind))
     profile_id = str(value.get("id") or "").strip()
@@ -77,14 +77,12 @@ def upsert_provider_profile(kind: ProviderKind, value: dict, path: Path | None =
         incoming["api_key"] = existing.api_key
     profile = _profile_model(kind).model_validate(incoming)
     index = next((index for index, item in enumerate(collection) if item.id == profile.id), None)
-    if kind == "llm" and getattr(state, _active_name(kind)) == profile.id and profile.purpose != "chat":
-        raise ValueError("主会话 Profile 不能改成 Embedding/Rerank 用途")
     if index is None:
         collection.append(profile)
     else:
         collection[index] = profile
     active_name = _active_name(kind)
-    if not getattr(state, active_name) and (kind != "llm" or profile.purpose == "chat"):
+    if not getattr(state, active_name):
         setattr(state, active_name, profile.id)
     save_provider_profiles(state, path)
     return state
@@ -96,7 +94,7 @@ def delete_provider_profile(kind: ProviderKind, profile_id: str, path: Path | No
     collection[:] = [item for item in collection if item.id != profile_id]
     active_name = _active_name(kind)
     if getattr(state, active_name) == profile_id:
-        setattr(state, active_name, next((p.id for p in collection if kind != "llm" or p.purpose == "chat"), None))
+        setattr(state, active_name, next((p.id for p in collection), None))
     save_provider_profiles(state, path)
     return state
 
@@ -106,8 +104,6 @@ def set_active_provider_profile(kind: ProviderKind, profile_id: str, path: Path 
     collection = getattr(state, _collection_name(kind))
     if not any(item.id == profile_id for item in collection):
         raise KeyError(f"{kind.upper()} Provider Profile 不存在：{profile_id}")
-    if kind == 'llm' and next(item for item in collection if item.id==profile_id).purpose != 'chat':
-        raise ValueError('Embedding/Rerank Profile 不能设为主会话 LLM')
     setattr(state, _active_name(kind), profile_id)
     save_provider_profiles(state, path)
     return state
@@ -124,7 +120,7 @@ def get_profile(kind: ProviderKind, profile_id: str, path: Path | None = None):
 def public_provider_profiles(state: ProviderProfilesState | None = None) -> dict:
     state = state or load_provider_profiles()
     data = state.model_dump()
-    for kind in ("stt", "llm", "tts"):
+    for kind in ("stt", "llm", "tts", "embedding", "rerank"):
         for profile in data[f"{kind}_profiles"]:
             profile["api_key_set"] = bool(profile.get("api_key"))
             profile["api_key"] = ""

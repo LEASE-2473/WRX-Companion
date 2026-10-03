@@ -112,9 +112,10 @@ def settings():
     for attr,prefix in [('embedding_profile_id',''),('rerank_profile_id','rerank_')]:
         pid=getattr(value,attr)
         if pid:
-            p=get_profile('llm',pid)
+            p=get_profile('rerank' if prefix else 'embedding',pid)
             if prefix:
-                value.vector.rerank_url=p.base_url.rstrip('/') if p.base_url.rstrip('/').endswith('/rerank') else p.base_url.rstrip('/')+'/rerank';value.vector.rerank_key=p.api_key;value.vector.rerank_model=p.model
+                from app.memory.vector_store import _rerank_url
+                value.vector.rerank_url=_rerank_url(p.base_url);value.vector.rerank_key=p.api_key;value.vector.rerank_model=p.model
             else:
                 value.vector.api_url=p.base_url;value.vector.api_key=p.api_key;value.vector.model=p.model
     return value
@@ -137,7 +138,8 @@ def stored_settings(value):
 def migrate_profiles():
     """只迁移已配置旧LLM，密钥进入统一Profile；保留其它记忆设置。"""
     from app.providers.profiles import upsert_provider_profile, load_provider_profiles
-    existing_ids={p.id for p in load_provider_profiles().llm_profiles}
+    state = load_provider_profiles()
+    existing_ids={p.id for kind in ('llm','embedding','rerank') for p in getattr(state,kind+'_profiles')}
     def unused(pid):
         value=new_id(lambda value: value in existing_ids)
         existing_ids.add(value)
@@ -153,7 +155,7 @@ def migrate_profiles():
     for attr,purpose,url,key,model in [('embedding_profile_id','embedding','api_url','api_key','model'),('rerank_profile_id','rerank','rerank_url','rerank_key','rerank_model')]:
         if not getattr(value,attr) and getattr(value.vector,url) and (purpose=='embedding' or value.vector.rerank_key):
             pid=unused('memory-'+purpose)
-            upsert_provider_profile('llm',{'id':pid,'name':'角色记忆 · '+purpose,'purpose':purpose,'base_url':getattr(value.vector,url),'api_key':getattr(value.vector,key),'model':getattr(value.vector,model)})
+            upsert_provider_profile(purpose,{'id':pid,'name':'角色记忆 · '+purpose,'base_url':getattr(value.vector,url),'api_key':getattr(value.vector,key),'model':getattr(value.vector,model)})
             setattr(value,attr,pid);setattr(value.vector,key,'')
     value.profiles_migrated=True
     store.save_setting('role_memory',stored_settings(value))
@@ -178,9 +180,9 @@ def save_settings(value):
     new.profiles_migrated = old.profiles_migrated
     from app.providers.profiles import get_profile
     for preset in new.presets.values():
-        if preset.llm_profile_id and get_profile('llm',preset.llm_profile_id).purpose != 'chat':raise ValueError('记忆任务必须选择对话用途 Profile')
+        if preset.llm_profile_id: get_profile('llm',preset.llm_profile_id)
     for key in ['embedding_profile_id','rerank_profile_id']:
-        if getattr(new,key) and get_profile('llm',getattr(new,key)).purpose != ('embedding' if key=='embedding_profile_id' else 'rerank'):raise ValueError('向量 Profile 用途不匹配')
+        if getattr(new,key): get_profile('embedding' if key=='embedding_profile_id' else 'rerank',getattr(new,key))
     if old.embedding_profile_id and not new.embedding_profile_id:
         new.vector.api_url='';new.vector.api_key='';new.vector.model='';new.vector.enabled=False
     if old.rerank_profile_id and not new.rerank_profile_id:

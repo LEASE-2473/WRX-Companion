@@ -21,7 +21,7 @@
 | 可编辑运行提示词与文件映射 | [提示词](modules/memory/PROMPTS.md) |
 | 十二情绪与管家 | [character](modules/character/README.md) |
 | 预设、宏与提示词世界书 | [prompting](modules/prompting/README.md) |
-| 模型、STT、TTS、用途Profile与usage | [providers](modules/providers/README.md) |
+| LLM、TTS、STT、Embedding、Rerank与usage | [providers](modules/providers/README.md) |
 | 录音、实时识别和播放 | [voice](modules/voice/README.md) |
 | 全局运行设置 | [settings](modules/settings/README.md) |
 | 联网搜索 | [search](modules/search/README.md) |

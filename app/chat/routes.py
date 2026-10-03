@@ -88,8 +88,7 @@ def validate_character(value):
     if value.lorebook_id:
         get_lorebook(value.lorebook_id)
     if value.llm_profile_id:
-        if get_profile("llm", value.llm_profile_id).purpose != "chat":
-            raise ValueError("角色必须绑定对话用途 Profile")
+        get_profile("llm", value.llm_profile_id)
     if value.tts_profile_id:
         get_profile("tts", value.tts_profile_id)
 

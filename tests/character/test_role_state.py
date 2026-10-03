@@ -105,8 +105,8 @@ def test_profiles_migrate_without_collision_and_mask_keys():
     assert provider_store.get_profile('llm','memory-diary').api_key=='original'
     assert role_memory.task_llm(updated.presets['diary']).api_key=='legacy'
     assert 'legacy' not in json.dumps(role_memory.public_settings())
-    provider_store.upsert_provider_profile('llm',{'id':'embed','name':'embed','purpose':'embedding'})
-    with pytest.raises(ValueError):provider_store.set_active_provider_profile('llm','embed')
+    provider_store.upsert_provider_profile('embedding',{'id':'embed','name':'embed'})
+    with pytest.raises(KeyError):provider_store.set_active_provider_profile('llm','embed')
 
 
 def test_manager_failure_is_logged_without_retry(monkeypatch):

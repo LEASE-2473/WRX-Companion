@@ -14,7 +14,7 @@ def settings():return emotion.config()
 def save_settings(value:emotion.EmotionSettings):
     try:
         for pid in [value.llm_profile_id,value.contact_llm_profile_id]:
-            if pid and get_profile('llm',pid).purpose != 'chat':raise ValueError('情绪管家与主动联系必须选择对话用途 Profile')
+            if pid: get_profile('llm',pid)
         emotion.prompt_files.write('emotion_summary',value.summary_prompt)
         store.save_setting('role_emotion_settings',value.model_dump(exclude={'summary_prompt'}));return value
     except (KeyError,ValueError) as exc:raise api_error(exc)

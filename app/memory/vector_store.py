@@ -249,13 +249,24 @@ def _embedding_url(api_url: str) -> str:
     return f"{cleaned}/embeddings"
 
 
+def _rerank_url(api_url: str) -> str:
+    cleaned = api_url.rstrip('/')
+    if cleaned.endswith('/rerank'):
+        return cleaned
+    if not cleaned.endswith('/v1'):
+        cleaned += '/v1'
+    return cleaned + '/rerank'
+
+
 def _models_url(api_url: str) -> str:
-    cleaned = api_url.rstrip("/")
-    if "/v1/" in cleaned:
-        cleaned = cleaned.split("/v1/", 1)[0] + "/v1"
-    elif not cleaned.endswith("/v1"):
-        cleaned = f"{cleaned}/v1"
-    return f"{cleaned}/models"
+    cleaned = api_url.rstrip('/')
+    for suffix in ('/embeddings', '/rerank', '/chat/completions', '/models'):
+        if cleaned.endswith(suffix):
+            cleaned = cleaned[:-len(suffix)]
+            break
+    if not cleaned.endswith('/v1') and not ('googleapis.com' in cleaned and '/openai' in cleaned):
+        cleaned += '/v1'
+    return cleaned + '/models'
 
 
 async def _client() -> httpx.AsyncClient:
@@ -288,13 +299,13 @@ async def get_embeddings(texts: list[str], config: VectorMemoryConfig) -> list[l
     return [[float(value) for value in vector] for vector in vectors]
 
 
-async def fetch_vector_models(api_url: str, api_key: str = "") -> list[str]:
+async def fetch_vector_models(api_url: str, api_key: str = "", models_url: str = "") -> list[str]:
     if not api_url.strip():
         raise ValueError("请先填写 API URL")
     headers: dict[str, str] = {}
     if api_key.strip():
         headers["Authorization"] = f"Bearer {api_key}"
-    response = await (await _client()).get(_models_url(api_url), headers=headers)
+    response = await (await _client()).get(models_url.strip() or _models_url(api_url), headers=headers)
     response.raise_for_status()
     payload = response.json()
     data = payload.get("data") if isinstance(payload, dict) else None

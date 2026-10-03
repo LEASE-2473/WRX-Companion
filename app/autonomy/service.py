@@ -150,8 +150,7 @@ def save_settings(value):
         cfg.api_key = old.api_key
     if cfg.llm_profile_id:
         from app.providers.profiles import get_profile
-        if get_profile('llm', cfg.llm_profile_id).purpose != 'chat':
-            raise ValueError('活动模型必须是对话用途')
+        get_profile('llm', cfg.llm_profile_id)
     for cid in cfg.conversation_ids:
         store.get_conversation(cid)
     store.save_setting('autonomy', cfg.model_dump())
