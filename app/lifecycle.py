@@ -36,5 +36,5 @@ async def lifespan(app):
         await asyncio.gather(scheduler, return_exceptions=True)
         await asyncio.gather(cleanup_scheduler, return_exceptions=True)
         await core.shutdown()
-        from app.tools.toy.controller import shutdown as shutdown_tools
+        from app.extensions.manager import shutdown as shutdown_tools
         await asyncio.to_thread(shutdown_tools)

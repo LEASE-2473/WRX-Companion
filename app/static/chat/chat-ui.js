@@ -306,7 +306,7 @@ async function sendTypedText(override = null) {
     await consumeEvents(response, payload => {
       if (payload.type === 'state') status(payload.state);
       if (payload.type === 'search') renderSearchTurn(payload);
-      if (payload.type === 'tool_result') { const n = document.getElementById('roleToolTurnStatus'); if (n) n.textContent = payload.status === 'error' ? '工具请求失败：' + payload.error : '工具请求已接收，执行状态请查看控制面板'; }
+      if (payload.type === 'tool_result') { const n = document.getElementById('roleToolTurnStatus'); if (n) n.textContent = payload.status !== 'accepted' ? '扩展请求未确认：' + payload.error : '扩展请求已接收，执行状态请查看应用面板'; }
       if (payload.type === 'transcript' && !override?.regenerate_mid && !override?.resend_mid) { const node = addMessage('user', payload.text); if (images.length) { const gallery = document.createElement('div'); gallery.className = 'message-images'; renderImages(gallery, images); node.querySelector('.message-body').append(gallery); } }
       if (payload.type === 'delta') {
         delta += payload.text;

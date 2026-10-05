@@ -21,7 +21,7 @@
 | 角色／会话删除 | chat/store；diary_hooks、角色共享记忆、系统表来源、情绪、请求和图片；检查哪些数据保留 |
 | 模型Profile／参数／用量 | providers、models、chat/core、角色记忆、系统记忆、情绪、语音；前端表单与Node回归 |
 | 技能 | skills/runtime白名单与事务；定义和PROTOCOL；chat/core；来源引用、memory_action_keys、重生成保护 |
-| 设备工具 | tools/toy、tools/routes、chat/core；前端tools；连接代次、取消、实际动作标记、退出清理 |
+| 设备工具 | extensions/toy、app/extensions、tools/routes、chat/core；前端tools；连接代次、取消、实际动作标记、退出清理 |
 | 静态脚本移动 | index.html加载顺序／缓存参数；共享状态、事件绑定、测试读取路径；结构检查和Node启动烟测 |
 | 文件或说明移动 | docs/PROJECT_STRUCTURE文件清单、README入口、文档链接、.gitignore、相关测试路径 |
 

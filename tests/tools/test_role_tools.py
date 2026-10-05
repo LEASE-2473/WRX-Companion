@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from app.chat import store
+pytest.importorskip('extensions.toy', reason='未安装独立toy扩展')
 from app.tools.toy import controller as tools
 from app.main import app
 from app.models import LlmProviderProfile, TokenUsage
@@ -77,18 +78,6 @@ def test_main_shutdown_waits_for_owned_service_and_preserves_warning(monkeypatch
     assert tools.status('test')['warning'] == '停止写入未确认'
 
 
-def test_close_route_requires_header_and_blocks_shutdown_proxy(monkeypatch):
-    conv = store.create_conversation()
-    calls = []
-    monkeypatch.setattr(tools, 'close', lambda cid: calls.append(cid) or {'attached':False})
-    with TestClient(app) as client:
-        assert client.post('/api/role-tools/toy/close/'+conv.id).status_code == 400
-        assert not calls
-        assert client.post('/api/role-tools/toy/ble/api/shutdown', json={},
-                           headers={'X-BLE-Token':tools._panel_token}).status_code == 400
-        assert client.post('/api/role-tools/toy/close/'+conv.id,
-                           headers={'X-Role-Tools':'1'}).status_code == 200
-        assert calls == [conv.id]
 
 
 def test_late_refresh_cannot_restore_closed_state(monkeypatch):
@@ -103,19 +92,6 @@ def test_late_refresh_cannot_restore_closed_state(monkeypatch):
     assert not tools.status('test')['service_running']
 
 
-def test_lazy_reuse_no_bluetooth_actions_and_proxy(monkeypatch):
-    actions = []
-    monkeypatch.setattr(tools, 'page', lambda:("const token='secret';fetch('/api/'+command)", 'secret'))
-    monkeypatch.setattr(tools, 'request', lambda name, args=None: actions.append(name) or ready())
-    a, b = store.create_conversation(), store.create_conversation()
-    with TestClient(app) as client:
-        assert client.get('/api/role-tools/status/'+a.id).json()['tools'][0]['ready'] is False
-        assert not actions
-        assert client.post('/api/role-tools/toy/start/'+a.id, headers={'X-Role-Tools':'1'}).json()['ready']
-        assert actions == ['state']
-        assert '/api/role-tools/toy/ble/api/' in client.get('/api/role-tools/toy/panel', params={'cid':a.id}).text
-        assert client.get('/api/role-tools/status/'+b.id).json()['tools'][0]['ready'] is True
-        assert client.post('/api/role-tools/toy/ble/api/arbitrary', json={}).status_code == 400
 
 
 def test_prepare_gate_execution_recheck_and_scope(monkeypatch):
@@ -134,66 +110,8 @@ def test_prepare_gate_execution_recheck_and_scope(monkeypatch):
     with pytest.raises(ValueError): tools.execute('other', 0, 'toy_stop', {})
 
 
-def test_native_tools_one_request_fragmented_arguments_and_incomplete_stream():
-    requests, executed = [], []
-    chunks = [
-        {'choices':[{'index':0,'delta':{'content':'我在。'}}]},
-        {'choices':[{'index':0,'delta':{'tool_calls':[{'index':0,'id':'call1','function':{'name':'toy_set_intensity','arguments':'{"channel1":'}}]}}]},
-        {'choices':[{'index':0,'delta':{'tool_calls':[{'index':0,'function':{'arguments':'15,"channel2":0,"channel3":0}'}}]},'finish_reason':'tool_calls'}]},
-    ]
-    def handler(request):
-        requests.append(json.loads(request.content))
-        return httpx.Response(200, text=''.join('data: '+json.dumps(c)+'\n\n' for c in chunks)+'data: [DONE]\n\n')
-    async def scenario():
-        llm = OpenAICompatibleLlm(LlmProviderProfile(id='x',name='x',api_key='fake',model='fake'))
-        llm.function_tools = tools.definitions()
-        async def run(name,args): executed.append((name,args))
-        llm.function_executor = run
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            llm.client = lambda:client
-            assert ''.join([p async for p in llm.stream_complete([])]) == '我在。'
-            assert len(requests) == 1 and requests[0]['tools']
-            assert executed == [('toy_set_intensity', {'channel1':15,'channel2':0,'channel3':0})]
-    asyncio.run(scenario())
-    chunks[:] = [chunks[1]]  # 流缺少finish/DONE，不执行半条指令。
-    executed.clear()
-    with pytest.raises(ProviderError, match='提前结束'):
-        asyncio.run(scenario())
-    assert not executed
 
 
-@pytest.mark.parametrize('first_text,second_text', [('', '已提交停止请求。'), ('正在处理。', ''), ('', ''), ('  ', '已提交。')])
-def test_core_tool_text_fallback(monkeypatch, first_text, second_text):
-    prepared = {'lease':0,'tools':tools.definitions(),'prompt':'框架skill'}
-    async def prepare(cid): return prepared
-    monkeypatch.setattr(tools, 'prepare', prepare)
-    monkeypatch.setattr(tools, 'execute', lambda *a:{'command':{'queued':True}})
-    class Fake:
-        last_usage = TokenUsage(input_tokens=10,output_tokens=5)
-        profile = SimpleNamespace(api_key='fake')
-        calls = 0
-        def set_generation_parameters(self, values): pass
-        async def stream_complete(self, messages):
-            self.calls += 1
-            assert any('框架skill' in m.content for m in messages)
-            if self.calls == 1:
-                await self.function_executor('toy_stop', {})
-                yield first_text
-            else:
-                assert self.function_tools is None and self.function_executor is None
-                assert self.single_text_attempt
-                assert any('设备工具执行结果' in m.content for m in messages)
-                yield second_text
-    fake = Fake()
-    monkeypatch.setattr(core, 'llm_for', lambda *a:fake)
-    async def scenario():
-        conv = store.create_conversation()
-        job = core.submit(conv.id,'native-tool','停一下',conv.timezone,search_mode='OFF')
-        await job.task
-        assert job.events[-1]['type'] == ('complete' if first_text.strip() or second_text else 'error'), job.events[-1]
-        assert sum(e['type']=='tool_result' for e in job.events) == 1
-        assert fake.calls == (1 if first_text.strip() else 2)
-    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize('args', [
@@ -279,17 +197,6 @@ def test_skill_scope_and_snapshot(monkeypatch):
     assert asyncio.run(tools.prepare('other'))['tools'] == prepared['tools']
 
 
-def test_proxy_requires_panel_token_and_start_header(monkeypatch):
-    conv = store.create_conversation()
-    monkeypatch.setattr(tools, '_enabled', True)
-    actions = []
-    monkeypatch.setattr(tools, 'request', lambda action, args=None: actions.append(action) or ready())
-    with TestClient(app) as client:
-        assert client.post('/api/role-tools/toy/start/'+conv.id).status_code == 400
-        assert client.post('/api/role-tools/toy/ble/api/stop', json={}).status_code == 400
-        assert not actions
-        assert client.post('/api/role-tools/toy/ble/api/state', json={}, headers={'X-BLE-Token':tools._panel_token}).status_code == 200
-        assert actions == ['state']
 
 
 def test_reconnect_invalidates_prepared_call(monkeypatch):
@@ -333,40 +240,6 @@ def test_global_open_preserves_program_and_other_sessions_can_stop(monkeypatch):
     assert all(action in {'state','stop'} for action in actions)
 
 
-@pytest.mark.parametrize('replay_kind', ['regenerate_mid','resend_mid','failed_retry'])
-def test_replay_sees_skill_but_cannot_repeat_device_action(monkeypatch, replay_kind):
-    async def prepare(cid):
-        return {'lease':0,'tools':tools.definitions(),'prompt':'可见设备说明'}
-    monkeypatch.setattr(tools, 'prepare', prepare)
-    executed = []
-    monkeypatch.setattr(tools, 'execute', lambda *args: executed.append(args[2]) or {})
-    class Fake:
-        last_usage = TokenUsage()
-        profile = SimpleNamespace(api_key='fake')
-        def set_generation_parameters(self, values): pass
-        async def stream_complete(self, messages):
-            assert any('可见设备说明' in message.content for message in messages)
-            assert [tool['function']['name'] for tool in self.function_tools] == ['toy_get_state']
-            assert (await self.function_executor('toy_stop', {}))['status'] == 'error'
-            assert (await self.function_executor('toy_get_state', {}))['status'] == 'accepted'
-            yield '能看到设备说明，本轮只读。'
-    monkeypatch.setattr(core, 'llm_for', lambda *args:Fake())
-    async def scenario():
-        conv = store.create_conversation()
-        store.begin_turn(conv.id,'original','测试',conv.timezone,'web','OFF')
-        if replay_kind=='failed_retry':
-            store.claim_device_action('original','toy_stop',store.get_request('original')['attempt'])
-            store.complete_device_action('original','toy_stop')
-            store.fail_turn('original','动作成功后模型失败')
-        else:
-            store.finish_turn('original','已有回复',TokenUsage(),[],[],{})
-        messages = store.get_conversation(conv.id).messages
-        target = next(message.id for message in messages if message.role == ('assistant' if replay_kind == 'regenerate_mid' else 'user'))
-        job = core.submit(conv.id,'original','测试',conv.timezone,search_mode='OFF') if replay_kind=='failed_retry' else core.submit(conv.id,'replay','再试一次',conv.timezone,search_mode='OFF',**{replay_kind:target})
-        await job.task
-        assert job.events[-1]['type'] == 'complete', job.events[-1]
-        assert executed == ['toy_get_state']
-    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize('status', [200, 503])

@@ -25,3 +25,11 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_settings_store, 'WRX_RUNTIME_SETTINGS_FILE', tmp_path / 'runtime.json')
     from app.memory import vector_store
     monkeypatch.setattr(vector_store, 'VECTOR_MEMORY_FILE', tmp_path / 'vectors.json')
+
+    from app.skills import configuration
+    from app.extensions import manager
+    monkeypatch.setattr(configuration,'FILE',tmp_path / 'skills_config.json')
+    monkeypatch.setattr(manager,'CONFIG',tmp_path / 'extensions_config.json')
+    monkeypatch.setattr(manager,'DIRECTORY',tmp_path / 'extensions')
+    monkeypatch.setattr(manager,'_instances',{})
+    monkeypatch.setattr(manager,'_revisions',{})

@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import APP_VERSION, STATIC_DIR
 from app.lifecycle import lifespan
 from app.chat.routes import router as chat_router
+from app.extensions.routes import router as extensions_router
 from app.tools.routes import router as tools_router
 from app.memory.role_routes import router as role_memory_router
 from app.memory.system_routes import router as system_memory_router
@@ -21,7 +22,7 @@ from app.voice.routes import router as voice_router
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)
 for router in (
-    chat_router, tools_router, role_memory_router, system_memory_router,
+    chat_router, extensions_router, tools_router, role_memory_router, system_memory_router,
     vector_memory_router, skills_router, character_router, autonomy_router,
     prompting_router, providers_router, settings_router, voice_router,
 ):

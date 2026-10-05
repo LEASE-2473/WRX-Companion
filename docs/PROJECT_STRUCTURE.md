@@ -1,6 +1,6 @@
 # 当前项目目录与逐文件用途
 
-更新：2026-10-04。此索引以实际文件生成；历史迁移说明在docs/archive。
+更新：2026-10-05。此索引以实际文件生成；历史迁移说明在docs/archive。
 
 编辑用途表`docs/reference/FILE_PURPOSES.json`后运行`python scripts/update_structure_index.py`。
 `python scripts/check_structure.py`检查运行文件登记、索引同步及现行文档链接。
@@ -9,7 +9,8 @@
 
 | 位置 | 用途 |
 |---|---|
-| app/ | 正式程序及全部必需静态资源、技能和任务提示词 |
+| app/ | 陪伴宿主、静态资源、技能和任务提示词 |
+| extensions/toy/ | 可选独立HTTP/XML扩展，需另行安装 |
 | data/ | 私人SQLite、JSON配置、设备记录与本机备份；不公开上传 |
 | docs/ | 当前说明、操作指南、未来规划、历史归档 |
 | experiments/emotion-lab/ | 独立离线实验，不参与正式聊天 |
@@ -88,6 +89,16 @@
 | [app/common/identity.py](../app/common/identity.py) | 安全Base62实体身份与碰撞检查 |
 | [app/common/time_format.py](../app/common/time_format.py) | UTC秒时间规范化与持久格式 |
 
+### extensions
+
+| 文件 | 用途 |
+|---|---|
+| [app/extensions/__init__.py](../app/extensions/__init__.py) | 扩展模块包入口 |
+| [app/extensions/manager.py](../app/extensions/manager.py) | 扫描、显式启停、进程归属与HTTP通信 |
+| [app/extensions/routes.py](../app/extensions/routes.py) | 管理API与同源应用代理 |
+| [app/extensions/runtime.py](../app/extensions/runtime.py) | 正文XML过滤、参数外壳解析与请求保护 |
+| [app/extensions/schema.py](../app/extensions/schema.py) | 扩展声明与路径规范检查 |
+
 ### memory
 
 | 文件 | 用途 |
@@ -151,11 +162,9 @@
 | 文件 | 用途 |
 |---|---|
 | [app/skills/__init__.py](../app/skills/__init__.py) | Python包入口／模块分区标记 |
+| [app/skills/configuration.py](../app/skills/configuration.py) | 内置技能启停与注入方式配置 |
 | [app/skills/definitions/diary-write/SKILL.md](../app/skills/definitions/diary-write/SKILL.md) | AI自主即时日记的运行技能 |
-| [app/skills/definitions/event-write/SKILL.md](../app/skills/definitions/event-write/SKILL.md) | 已停用旧事件技能，不进入允许目录 |
-| [app/skills/definitions/explore/SKILL.md](../app/skills/definitions/explore/SKILL.md) | 封存外出技能，保留未来方向 |
 | [app/skills/definitions/memory-read/SKILL.md](../app/skills/definitions/memory-read/SKILL.md) | 按需搜索／读取当前角色可见记忆的运行技能 |
-| [app/skills/definitions/reflect/SKILL.md](../app/skills/definitions/reflect/SKILL.md) | 封存实际活动反思技能，保留未来方向 |
 | [app/skills/PROTOCOL.md](../app/skills/PROTOCOL.md) | 普通聊天模型读取／写入的共享运行协议，不是维护说明 |
 | [app/skills/routes.py](../app/skills/routes.py) | 当前允许技能目录／正文只读接口 |
 | [app/skills/runtime.py](../app/skills/runtime.py) | 允许目录、按需读取、模型调用块、日记写入事务与幂等 |
@@ -184,7 +193,7 @@
 | [app/static/shared/state.js](../app/static/shared/state.js) | 页面共享变量、身份生成与热键规范化；首先加载 |
 | [app/static/shared/styles.css](../app/static/shared/styles.css) | 页面公共基础样式 |
 | [app/static/tools/role-tools.css](../app/static/tools/role-tools.css) | 设备工具卡片与面板样式 |
-| [app/static/tools/role-tools.js](../app/static/tools/role-tools.js) | 设备工具卡片、启动／关闭与面板生命周期 |
+| [app/static/tools/role-tools.js](../app/static/tools/role-tools.js) | 扩展与技能动态管理界面 |
 | [app/static/voice/voice-ui.js](../app/static/voice/voice-ui.js) | 麦克风采集、实时STT、语音请求、音频播放、录音控件与热键 |
 
 ### tools
@@ -192,16 +201,12 @@
 | 文件 | 用途 |
 |---|---|
 | [app/tools/__init__.py](../app/tools/__init__.py) | Python包入口／模块分区标记 |
-| [app/tools/routes.py](../app/tools/routes.py) | 角色工具卡片、按需服务和受令牌门控的同源面板代理 |
-| [app/tools/toy/__init__.py](../app/tools/toy/__init__.py) | Python包入口／模块分区标记 |
-| [app/tools/toy/controller.py](../app/tools/toy/controller.py) | 主应用设备子服务管理、Skill门控、原生工具、DIY序列与退出 |
-| [app/tools/toy/protocol.py](../app/tools/toy/protocol.py) | 设备协议、通道与帧编码 |
-| [app/tools/toy/records.py](../app/tools/toy/records.py) | 设备操作与播放运行记录，写data/toy |
-| [app/tools/toy/resources/classic_modes.json](../app/tools/toy/resources/classic_modes.json) | 八种经典播放模式数据 |
-| [app/tools/toy/resources/panel.html](../app/tools/toy/resources/panel.html) | 设备扫描、连接、经典模式和DIY控制面板 |
-| [app/tools/toy/resources/tools.json](../app/tools/toy/resources/tools.json) | 设备原生工具定义与参数结构 |
-| [app/tools/toy/service.py](../app/tools/toy/service.py) | 本机8767蓝牙HTTP服务，扫描／连接由用户操作 |
-| [app/tools/toy/skill/SKILL.md](../app/tools/toy/skill/SKILL.md) | 设备就绪时向模型提供的正式设备运行技能 |
+| [app/tools/routes.py](../app/tools/routes.py) | 旧角色工具启停与面板路由兼容薄包装 |
+| [app/tools/toy/__init__.py](../app/tools/toy/__init__.py) | 旧Python导入兼容；实现位于独立extensions/toy |
+| [app/tools/toy/controller.py](../app/tools/toy/controller.py) | 旧Python导入兼容；实现位于独立extensions/toy |
+| [app/tools/toy/protocol.py](../app/tools/toy/protocol.py) | 旧Python导入兼容；实现位于独立extensions/toy |
+| [app/tools/toy/records.py](../app/tools/toy/records.py) | 旧Python导入兼容；实现位于独立extensions/toy |
+| [app/tools/toy/service.py](../app/tools/toy/service.py) | 旧Python导入兼容；实现位于独立extensions/toy |
 
 ### voice
 
@@ -211,6 +216,10 @@
 | [app/voice/pipeline.py](../app/voice/pipeline.py) | 语音回复正文清洗、可朗读片段和异常描述 |
 | [app/voice/routes.py](../app/voice/routes.py) | 实时STT WebSocket、语音请求SSE与单轮配置快照；正式聊天走chat/core |
 
+## extensions：独立应用安装目录
+
+主仓库仅保留[安装说明](../extensions/README.md)；toy和其他应用由各自仓库管理，不在宿主逐文件索引中登记。
+
 ## docs：现行说明
 
 archive保存原文历史，可能含旧路径，详见[归档索引](archive/README.md)。planning仅表示未来／封存方向。
@@ -219,6 +228,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 |---|---|
 | [docs/COMPANION_GUIDE.md](../docs/COMPANION_GUIDE.md) | 当前版本使用与验收 |
 | [docs/experiments/EMOTION_LAB.md](../docs/experiments/EMOTION_LAB.md) | 独立情绪实验台 |
+| [docs/extensions/DEVELOPER_GUIDE.md](../docs/extensions/DEVELOPER_GUIDE.md) | Extension 开发与接入指南 |
 | [docs/images/autonomy-archived.jpg](../docs/images/autonomy-archived.jpg) | 说明配图／参考资源 |
 | [docs/images/chat-ui-offline-preview.jpg](../docs/images/chat-ui-offline-preview.jpg) | 说明配图／参考资源 |
 | [docs/images/compact-footer-search.png](../docs/images/compact-footer-search.png) | 说明配图／参考资源 |
@@ -239,12 +249,16 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | [docs/modules/providers/README.md](../docs/modules/providers/README.md) | LLM、TTS、STT、Embedding与Rerank |
 | [docs/modules/search/README.md](../docs/modules/search/README.md) | 联网搜索 |
 | [docs/modules/settings/README.md](../docs/modules/settings/README.md) | 全局设置与旧向量兼容边界 |
-| [docs/modules/tools/ROLE_TOOLS.md](../docs/modules/tools/ROLE_TOOLS.md) | 角色工具与模型调用 |
+| [docs/modules/tools/ROLE_TOOLS.md](../docs/modules/tools/ROLE_TOOLS.md) | Toy Extension 正式接入 |
 | [docs/modules/voice/README.md](../docs/modules/voice/README.md) | 辅助录音、STT与音频播放 |
 | [docs/operations/DATABASE_MIGRATION.md](../docs/operations/DATABASE_MIGRATION.md) | 数据库迁移、部署与回滚 |
 | [docs/operations/DEPLOYMENT_SNAPSHOTS.md](../docs/operations/DEPLOYMENT_SNAPSHOTS.md) | 现有数据与部署副本清单 |
 | [docs/planning/autonomy/PHASE4_AUTONOMY.md](../docs/planning/autonomy/PHASE4_AUTONOMY.md) | 阶段 4：自主外出与活动笔记 |
 | [docs/planning/README.md](../docs/planning/README.md) | 当前未来规划 |
+| [docs/planning/skills and extension/archived/event-write/SKILL.md](../docs/planning/skills and extension/archived/event-write/SKILL.md) | 已停用旧事件技能，不进入允许目录 |
+| [docs/planning/skills and extension/archived/explore/SKILL.md](../docs/planning/skills and extension/archived/explore/SKILL.md) | 封存外出技能，保留未来方向 |
+| [docs/planning/skills and extension/archived/reflect/SKILL.md](../docs/planning/skills and extension/archived/reflect/SKILL.md) | 封存实际活动反思技能，保留未来方向 |
+| [docs/planning/skills and extension/EXTENSION_ARCHITECTURE_PLAN.md](../docs/planning/skills and extension/EXTENSION_ARCHITECTURE_PLAN.md) | Extension 架构实施记录 |
 | [docs/PROJECT_STRUCTURE.md](../docs/PROJECT_STRUCTURE.md) | 当前项目目录与逐文件用途 |
 | [docs/README.md](../docs/README.md) | 文档导航 |
 | [docs/reference/DATABASE_FIELDS.md](../docs/reference/DATABASE_FIELDS.md) | 数据库结构与字段人工审阅清单 |
@@ -300,6 +314,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | [tests/skills/__init__.py](../tests/skills/__init__.py) | 测试包标记 |
 | [tests/skills/test_chat_skills.py](../tests/skills/test_chat_skills.py) | 允许技能读取、调用解析、即时日记、事务和幂等回归 |
 | [tests/tools/__init__.py](../tests/tools/__init__.py) | 测试包标记 |
+| [tests/tools/test_extensions.py](../tests/tools/test_extensions.py) | 离线回归：extensions |
 | [tests/tools/test_role_tools.py](../tests/tools/test_role_tools.py) | 设备工具门控、DIY、连接代次、关闭与动作保护回归 |
 | [tests/tools/test_toy_package.py](../tests/tools/test_toy_package.py) | 无研究目录依赖的设备子服务部署与资源回归 |
 | [tests/ui/heartbeat_ui_test.cjs](../tests/ui/heartbeat_ui_test.cjs) | 心跳日志展开、用量耗时与安全文本显示回归 |
@@ -340,7 +355,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | 修改模型／语音配置 | providers与static/settings/app；录音播放在static/voice |
 | 修改冷热记忆／召回 | memory/role、system、vector_store；同步模型签名和失配回退 |
 | 修改情绪／主动联系 | character/state、chat/heartbeat及chat/core；跨模块同步 |
-| 修改设备能力 | tools/toy；技能、协议、执行和退出清理要一起核对 |
+| 修改设备能力 | extensions/toy与app/extensions；技能、协议、执行和退出清理要一起核对 |
 | 查数据库或部署版本 | docs/reference/DATABASE_FIELDS及docs/operations |
 | 查旧讨论、研究或升级过程 | docs/archive；当前状态仍以PROJECT_CONTEXT和源码为准 |
 

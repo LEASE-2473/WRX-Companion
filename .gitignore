@@ -53,3 +53,7 @@ Desktop.ini
 
 # 文档归档保持本地；运行app资源不忽略
 /docs/archive/
+
+# 独立扩展由各自仓库管理；主仓库仅保留安装说明
+/extensions/*
+!/extensions/README.md

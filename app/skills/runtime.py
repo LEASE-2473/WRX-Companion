@@ -11,6 +11,7 @@ from app.memory import schema as memory_schema
 from app.models import ChatMessage
 
 from app.config import SKILL_DEFINITIONS_DIR
+from app.skills import configuration
 ROOT = SKILL_DEFINITIONS_DIR
 CATALOG={'memory-read':'搜索或读取当前角色可见记忆，信息不足时才使用。','diary-write':'写一段即时日记，保留当下值得记住的感受。'}
 OPEN='<app_call'
@@ -18,17 +19,17 @@ PATTERN=re.compile(r'<app_call\s+name="([a-z_]+)"\s*>(.*?)</app_call>',re.S)
 READS={'read_skill','search_memory','read_memory'}
 WRITES={'append_diary_entry'}
 
-def catalog():
+def catalog(include_disabled=False):
     result=[]
     for path in sorted(ROOT.glob('*/SKILL.md')):
         name=path.parent.name
-        if name in ('explore','reflect','event-write') or not re.fullmatch(r'[a-z][a-z0-9-]{0,63}',name):continue
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,63}',name):continue
         if not path.resolve().is_relative_to(ROOT.resolve()):continue
         text=path.read_text(encoding='utf-8')
         header=text.split('---',2)[1] if text.startswith('---') and text.count('---')>=2 else ''
         match=re.search(r'^description:\s*(.+)$',header,re.M)
         description=match.group(1).strip().strip('"\'') if match else CATALOG.get(name)
-        if description:result.append({'name':name,'description':description})
+        if description and (include_disabled or configuration.policy(name)['enabled']):result.append({'name':name,'description':description,**configuration.policy(name)})
     return result
 
 def read_skill(name):
@@ -37,10 +38,12 @@ def read_skill(name):
 
 def protocol():
     text=(ROOT.parent/'PROTOCOL.md').read_text(encoding='utf-8').strip()
-    return '[应用内技能目录]\n'+json.dumps(catalog(),ensure_ascii=False)+'\n'+text
+    return '[应用内技能目录]\n'+json.dumps(catalog(),ensure_ascii=False)+'\n'+text+'\n'+'\n'.join('[直接提供技能 '+i['name']+']\n'+read_skill(i['name']) for i in catalog() if i['injection']=='always')
 
 
 def visible(text):
+    from app.extensions.runtime import visible as extension_visible
+    text = extension_visible(text)
     # 完整块和未闭合块都隐藏；残缺开标签的前缀也不泄漏。
     text=re.sub(r'<app_call\b.*?</app_call>','',text,flags=re.S)
     at=text.find(OPEN)
@@ -62,6 +65,7 @@ def calls(text):
 def perform_read(cid,name,args):
     conv=store.get_conversation(cid)
     if name=='read_skill':return {'skill':read_skill(args.get('name'))}
+    if not configuration.policy('memory-read')['enabled']:raise ValueError('技能已停用')
     records=memory.visible(conv.character_id,cid)
     from app.memory.system import rows, text
     records += [dict(r,content=text(r),tags=[r['tag']] if r['tag'] else [],sources=[]) for r in rows(conv.character_id,cid)]
@@ -107,6 +111,7 @@ def write_actions(raw):
         for name,args in actions:
             if name in READS:continue
             if name not in WRITES:raise ValueError('未知写入工具')
+            if not configuration.policy('diary-write')['enabled']:raise ValueError('技能已停用')
             if set(args)-({'title','content','tags'} if name=='append_diary_entry' else {'content','tags'}):raise ValueError('日记只需title、content、tags，事件只需content、tags')
             checked=memory.RecordInput.model_validate(args)
             checked.tags = list(dict.fromkeys(t.strip() for t in checked.tags))
@@ -117,6 +122,7 @@ def write_actions(raw):
     except (ValueError,TypeError) as exc:return [],str(exc)
 
 def commit(db,conv,rid,actions,source_ids,regenerated=False):
+    if actions and not configuration.policy('diary-write')['enabled']:return [{'status':'skipped','reason':'技能已停用'}]
     if regenerated:return [{'status':'skipped','reason':'重新生成／编辑重发不产生新记忆'}] if actions else []
     memory.initialize(db)
     db.execute('CREATE TABLE IF NOT EXISTS memory_action_keys(request_id TEXT NOT NULL,action_index INTEGER NOT NULL,memory_id TEXT NOT NULL,PRIMARY KEY(request_id,action_index))')

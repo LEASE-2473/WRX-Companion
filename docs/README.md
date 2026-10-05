@@ -26,6 +26,7 @@
 | 全局运行设置 | [settings](modules/settings/README.md) |
 | 联网搜索 | [search](modules/search/README.md) |
 | 应用技能与调用协议 | [技能参考](reference/SKILLS.md) |
+| Extension开发与HTTP/XML接入 | [开发指南](extensions/DEVELOPER_GUIDE.md) |
 | 角色设备工具 | [Toy正式接入](modules/tools/ROLE_TOOLS.md) |
 | SQLite与JSON字段 | [数据库字段](reference/DATABASE_FIELDS.md) |
 
@@ -33,7 +34,7 @@
 
 - [数据库迁移与部署](operations/DATABASE_MIGRATION.md)、[部署副本清单](operations/DEPLOYMENT_SNAPSHOTS.md)。
 - [独立情绪实验台](experiments/EMOTION_LAB.md)：代码在experiments，不接入正式应用。
-- [当前未来规划](planning/README.md)：自主外出保留且停用，技能管理尚未实现。
+- [当前未来规划](planning/README.md)：自主外出保留且停用，技能管理已实现，扩展当前规范见开发指南。
 - [归档索引](archive/README.md)：旧说明、审计、研究、讨论与旧代码，仅作为历史证据。
 
 ## 文件状态

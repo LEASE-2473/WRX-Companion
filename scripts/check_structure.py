@@ -5,7 +5,7 @@ import re
 import runpy
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,7 +53,7 @@ def audit():
             url = match.group(1).strip('<>')
             if re.match(r'[a-zA-Z][a-zA-Z0-9+.-]*:', url) or url.startswith('#'):
                 continue
-            target = urlsplit(url).path
+            target = unquote(urlsplit(url).path)
             if not target:
                 continue
             links += 1

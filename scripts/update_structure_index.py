@@ -27,11 +27,12 @@ def render():
         if not (ROOT / name).is_file():
             raise ValueError(f'用途表指向不存在的文件：{name}')
     out = ['# 当前项目目录与逐文件用途', '',
-           '更新：2026-10-04。此索引以实际文件生成；历史迁移说明在docs/archive。', '',
+           '更新：2026-10-05。此索引以实际文件生成；历史迁移说明在docs/archive。', '',
            '编辑用途表`docs/reference/FILE_PURPOSES.json`后运行`python scripts/update_structure_index.py`。',
            '`python scripts/check_structure.py`检查运行文件登记、索引同步及现行文档链接。', '',
            '## 根目录', '', '| 位置 | 用途 |', '|---|---|',
-           '| app/ | 正式程序及全部必需静态资源、技能和任务提示词 |',
+           '| app/ | 陪伴宿主、静态资源、技能和任务提示词 |',
+           '| extensions/toy/ | 可选独立HTTP/XML扩展，需另行安装 |',
            '| data/ | 私人SQLite、JSON配置、设备记录与本机备份；不公开上传 |',
            '| docs/ | 当前说明、操作指南、未来规划、历史归档 |',
            '| experiments/emotion-lab/ | 独立离线实验，不参与正式聊天 |',
@@ -59,6 +60,8 @@ def render():
         selected = [p for p in app_files if (p.relative_to(ROOT / 'app').parts[0] if len(p.relative_to(ROOT / 'app').parts)>1 else '(入口与公共模型)') == group]
         table(selected, lambda p,n: purposes[n])
 
+    out.extend(['## extensions：独立应用安装目录', '', '主仓库仅保留[安装说明](../extensions/README.md)；toy和其他应用由各自仓库管理，不在宿主逐文件索引中登记。', ''])
+
     out.extend(['## docs：现行说明', '',
                 'archive保存原文历史，可能含旧路径，详见[归档索引](archive/README.md)。planning仅表示未来／封存方向。', ''])
     current_docs = [p for p in files('docs') if 'archive' not in p.relative_to(ROOT/'docs').parts]
@@ -85,7 +88,7 @@ def render():
                 '| 修改模型／语音配置 | providers与static/settings/app；录音播放在static/voice |',
                 '| 修改冷热记忆／召回 | memory/role、system、vector_store；同步模型签名和失配回退 |',
                 '| 修改情绪／主动联系 | character/state、chat/heartbeat及chat/core；跨模块同步 |',
-                '| 修改设备能力 | tools/toy；技能、协议、执行和退出清理要一起核对 |',
+                '| 修改设备能力 | extensions/toy与app/extensions；技能、协议、执行和退出清理要一起核对 |',
                 '| 查数据库或部署版本 | docs/reference/DATABASE_FIELDS及docs/operations |',
                 '| 查旧讨论、研究或升级过程 | docs/archive；当前状态仍以PROJECT_CONTEXT和源码为准 |', '',
                 '跨模块修改清单见[MAINTENANCE](MAINTENANCE.md)。新增／移动文件时更新用途表、索引、引用和相关测试；不要再通过同名全局函数覆盖旧实现。', ''])

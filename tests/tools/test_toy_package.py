@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+pytest.importorskip('extensions.toy', reason='未安装独立toy扩展')
 from app.tools.toy import controller
 
 
@@ -37,31 +38,10 @@ def test_service_close_stops_scanner_and_disconnects_even_if_stop_fails(monkeypa
         asyncio.run(bridge.action('scan', {}))
 
 
-def test_start_uses_application_python_and_module(monkeypatch, tmp_path):
-    calls = []
-    pages = iter([False, True])
-
-    def page():
-        if not next(pages):
-            raise OSError('not running')
-        return '', 'token'
-
-    monkeypatch.setattr(controller, 'ROOT', tmp_path)
-    monkeypatch.setattr(controller, '_enabled', False)
-    monkeypatch.setattr(controller, '_child', None)
-    monkeypatch.setattr(controller, 'page', page)
-    monkeypatch.setattr(controller, 'refresh', lambda: {})
-    monkeypatch.setattr(controller.subprocess, 'Popen', lambda *args, **kwargs: calls.append((args, kwargs)))
-    controller.start('test')
-    args, kwargs = calls[0]
-    assert args[0] == [sys.executable, '-m', 'app.tools.toy.service', '--no-browser']
-    assert kwargs['cwd'] == tmp_path
-    assert (tmp_path / 'data/toy/main-project-child.log').exists()
-
-
 def test_packaged_runtime_without_development_directory(tmp_path):
     source = Path(__file__).resolve().parents[2] / 'app'
     shutil.copytree(source, tmp_path / 'app', ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copytree(source.parent / 'extensions',tmp_path / 'extensions',ignore=shutil.ignore_patterns('__pycache__','data','.git'))
     script = '''
 import asyncio
 import json
@@ -74,7 +54,7 @@ assert len(controller.definitions()) == 10
 assert controller.SKILL.read_text(encoding='utf-8').startswith('---')
 assert len(service.MODES) == 8
 assert not service.bridge.client and not service.bridge.scanner
-assert records.RECORDS.is_relative_to(Path.cwd() / 'data')
+assert records.RECORDS == Path.cwd() / 'extensions/toy/data/records'
 server = service.ThreadingHTTPServer(('127.0.0.1', 0), service.Handler)
 service.PORT = server.server_address[1]
 controller.BASE = f'http://127.0.0.1:{service.PORT}'

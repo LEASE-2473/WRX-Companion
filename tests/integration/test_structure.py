@@ -34,16 +34,19 @@ from app.config import DATA_DIR, ROOT, STATIC_DIR, SKILL_DEFINITIONS_DIR
 from app.memory.prompt_files import PROMPT_DIR, read
 from app.skills.runtime import catalog
 from app.autonomy.service import SKILLS
-from app.tools.toy import controller, records, service
+import importlib.util
+if (ROOT / 'extensions/toy').is_dir():
+    from app.tools.toy import controller, records, service
+    assert (controller.TOY / 'skill/SKILL.md').is_file()
+    assert records.RECORDS == ROOT / 'extensions/toy/data/records'
+    assert (service.ROOT / 'panel.html').is_file()
 assert DATA_DIR == ROOT / 'data'
 assert (STATIC_DIR / 'index.html').is_file()
 assert PROMPT_DIR == ROOT / 'app/memory/prompts'
 assert read('system').strip()
 assert SKILLS == SKILL_DEFINITIONS_DIR
 assert {item['name'] for item in catalog()} == {'memory-read', 'diary-write'}
-assert (controller.TOY / 'skill/SKILL.md').is_file()
-assert records.RECORDS == DATA_DIR / 'toy/records'
-assert (service.ROOT / 'panel.html').is_file()
+
 '''
     result = subprocess.run([sys.executable, '-c', code], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

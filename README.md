@@ -48,7 +48,7 @@ node tests/ui/reply_format_test.cjs
 
 ## 角色工具
 
-蓝牙运行模块已包含在 `app/tools/toy/`，Python 程序、面板、模式数据、工具定义与 Skill 随主应用一起部署，依赖统一由根目录 `requirements.txt` 安装。主应用启动时不启动蓝牙后台；从侧栏「角色工具」的玩具卡片点击「启动工具」，才按需启动本机 8767 服务，由用户手动扫描和连接。不使用时点击「关闭工具」，停止播放、结束扫描、断开设备并退出后台；「收起面板」保留运行。仅接入且设备就绪时向聊天提供 Skill。无需 `Toy connection/` 或单独的 Python 环境，接入说明见 [角色工具文档](docs/modules/tools/ROLE_TOOLS.md)。
+蓝牙应用已迁到 `extensions/toy/`，toy由独立仓库管理，主项目下载不包含toy；安装参见 [扩展目录说明](extensions/README.md)。侧栏「扩展与技能」启用后按需启动，用户手动扫描与连接；关闭应用结束播放并退出后台。聊天使用正文 XML，不要求供应商支持原生工具调用。扩展开发见 [接入指南](docs/extensions/DEVELOPER_GUIDE.md)，设备说明见 [Toy](docs/modules/tools/ROLE_TOOLS.md)。
 
 ## 项目目录
 

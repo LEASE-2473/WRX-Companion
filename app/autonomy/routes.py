@@ -20,6 +20,7 @@ def save(value: dict):
 
 @router.get('/skills')
 def skills():
+    if autonomy.FEATURE_ARCHIVED:return {'skills':[], 'archived':True}
     return {'skills': [{'name': name, 'content': (autonomy.SKILLS / name / 'SKILL.md').read_text(encoding='utf-8')} for name in autonomy.SKILL_NAMES]}
 
 @router.post('/connection')

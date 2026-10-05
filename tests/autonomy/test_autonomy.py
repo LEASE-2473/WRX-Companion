@@ -14,6 +14,8 @@ from app.models import TokenUsage
 def unarchive_for_preserved_executor_tests(monkeypatch):
     # 归档实现的离线回归仍保留；生产始终封存，封存测试单独恢复门禁。
     monkeypatch.setattr(a, 'FEATURE_ARCHIVED', False)
+    from pathlib import Path
+    monkeypatch.setattr(a,'SKILLS',Path(__file__).resolve().parents[2] / 'docs/planning/skills and extension/archived')
 
 
 def configure():

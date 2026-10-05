@@ -155,6 +155,18 @@
     ]
   ],
   [
+    "/api/extensions",
+    [
+      "get"
+    ]
+  ],
+  [
+    "/api/extensions/{eid}/{operation}",
+    [
+      "post"
+    ]
+  ],
+  [
     "/api/lorebooks",
     [
       "get"
@@ -437,12 +449,6 @@
     ]
   ],
   [
-    "/api/role-tools/toy/ble/api/{action}",
-    [
-      "post"
-    ]
-  ],
-  [
     "/api/role-tools/toy/close/{cid}",
     [
       "post"
@@ -492,9 +498,21 @@
     ]
   ],
   [
+    "/api/skills/manage/list",
+    [
+      "get"
+    ]
+  ],
+  [
     "/api/skills/{name}",
     [
       "get"
+    ]
+  ],
+  [
+    "/api/skills/{name}/settings",
+    [
+      "put"
     ]
   ],
   [
@@ -611,6 +629,16 @@
     "/api/vector-memory/test",
     [
       "post"
+    ]
+  ],
+  [
+    "/apps/{eid}/{path}",
+    [
+      "delete",
+      "get",
+      "patch",
+      "post",
+      "put"
     ]
   ]
 ]
