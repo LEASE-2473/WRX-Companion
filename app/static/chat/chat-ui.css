@@ -89,3 +89,8 @@ main.chat-app{max-width:none;margin:0;padding:0;display:grid;grid-template-colum
 /* 输入正文与聊天消息同字号，空框一行，最多五行。 */
 .composer #textInput{font-size:14px;line-height:1.85;min-height:0;height:35.9px;max-height:139.5px;padding:5px 6px;overflow-y:hidden}
 .composer #textInput::placeholder{font-size:inherit}
+
+/* 手机使用原生 16px 避免聚焦自动放大，仍由 JS 按实际行高限制一至五行。 */
+@media(max-width:760px),(hover:none) and (pointer:coarse){
+  .composer #textInput{font-size:16px;height:39.6px;max-height:158px}
+}
