@@ -12,6 +12,173 @@ from app.main import app
 START=datetime(2026,10,1,tzinfo=timezone.utc)
 END=START+timedelta(hours=1)
 
+@pytest.fixture(autouse=True)
+def isolated_cold_scheduler(monkeypatch):
+    monkeypatch.setattr(memory, '_cold_tasks', {})
+    monkeypatch.setattr(memory, '_cold_last_checks', {})
+
+
+def test_auto_cold_age_failure_and_independent_scheduler(monkeypatch):
+    conv = store.create_conversation()
+    apply(conv, {'summary': {'content': '到期总结'}, 'agreements': [{'content': '失败时保留'}]})
+    with store.database() as db:
+        memory.apply(db, conv.character_id, conv.id, 'character', END.isoformat(),
+                     (END + timedelta(hours=1)).isoformat(),
+                     memory.Output.model_validate({'summary': {'content': '较新总结'}}))
+    config = memory.settings()
+    config.auto_cold_enabled = True
+    config.auto_cold_hours = 4
+    store.save_setting('system_memory', config.model_dump(exclude={'prompt'}))
+    vector = role_memory.settings()
+    vector.vector.enabled = True
+    role_memory.save_settings(vector.model_dump())
+    monkeypatch.setattr(store, 'utcnow', lambda: END + timedelta(hours=4))
+    calls = []
+
+    async def embed(texts, config):
+        calls.extend(texts)
+        if '失败时保留' in texts[0]:
+            raise ValueError('模拟向量服务失败')
+        return [[1.0, 2.0]]
+
+    monkeypatch.setattr(role_memory, 'get_embeddings', embed)
+
+    async def run():
+        async def scanning():
+            await asyncio.sleep(0)
+        memory._tasks[conv.character_id] = asyncio.create_task(scanning())
+        await memory.maintenance()
+        first = memory._cold_tasks[conv.character_id]
+        await memory.maintenance()
+        assert memory._cold_tasks[conv.character_id] is first
+        await first
+        assert memory._tasks[conv.character_id].done()
+
+    asyncio.run(run())
+    result = {r['content']: r for r in memory.rows(conv.character_id, conv.id)}
+    assert result['到期总结']['mode'] == 'cold'
+    assert result['到期总结']['vector'] == [1.0, 2.0]
+    assert result['较新总结']['mode'] == 'hot'
+    assert result['失败时保留']['mode'] == 'hot'
+    assert len(calls) == 2
+    vector.vector.enabled = False
+    role_memory.save_settings(vector.model_dump())
+    asyncio.run(memory.auto_cold(conv.character_id, conv.id))
+    assert len(calls) == 2
+    vector.vector.enabled = True
+    role_memory.save_settings(vector.model_dump())
+    config.auto_cold_enabled = False
+    store.save_setting('system_memory', config.model_dump(exclude={'prompt'}))
+    asyncio.run(memory.auto_cold(conv.character_id, conv.id))
+    assert len(calls) == 2
+
+
+def test_auto_cold_settings_validation_and_persistence():
+    client = TestClient(app)
+    config = client.get('/api/system-memory/settings').json()
+    assert config['auto_cold_enabled'] is False
+    assert config['auto_cold_mode'] == 'interval'
+    config.update(auto_cold_enabled=True, auto_cold_hours=3.5)
+    assert client.put('/api/system-memory/settings', json=config).status_code == 200
+    assert client.get('/api/system-memory/settings').json()['auto_cold_hours'] == 3.5
+    config['auto_cold_kinds'] = ['summary', 'agreement']
+    assert client.put('/api/system-memory/settings', json=config).status_code == 200
+    assert client.get('/api/system-memory/settings').json()['auto_cold_kinds'] == ['summary', 'agreement']
+    config['auto_cold_mode'] = 'immediate'
+    assert client.put('/api/system-memory/settings', json=config).status_code == 200
+    assert client.get('/api/system-memory/settings').json()['auto_cold_mode'] == 'immediate'
+    config['auto_cold_mode'] = 'invalid'
+    assert client.put('/api/system-memory/settings', json=config).status_code == 422
+    config['auto_cold_mode'] = 'interval'
+    config['auto_cold_kinds'] = ['book']
+    assert client.put('/api/system-memory/settings', json=config).status_code == 422
+    config['auto_cold_kinds'] = []
+    assert client.put('/api/system-memory/settings', json=config).status_code == 200
+    for hours in [0, -1, 8761]:
+        config['auto_cold_hours'] = hours
+        assert client.put('/api/system-memory/settings', json=config).status_code == 422
+
+
+def test_auto_cold_only_selected_tables(monkeypatch):
+    conv = store.create_conversation()
+    apply(conv, {'summary': {'content': '总结'}, 'people': [{'name': '人物'}],
+                'items': [{'name': '物品'}], 'agreements': [{'content': '约定'}]})
+    config = memory.settings()
+    assert set(config.auto_cold_kinds) == set(memory.schema.TABLES)
+    config.auto_cold_enabled = True
+    config.auto_cold_kinds = ['summary', 'item']
+    store.save_setting('system_memory', config.model_dump(exclude={'prompt'}))
+    vector = role_memory.settings()
+    vector.vector.enabled = True
+    role_memory.save_settings(vector.model_dump())
+    monkeypatch.setattr(store, 'utcnow', lambda: END + timedelta(hours=4))
+    calls = []
+    async def embed(texts, config):
+        calls.extend(texts)
+        return [[1.0, 2.0]]
+    monkeypatch.setattr(role_memory, 'get_embeddings', embed)
+    asyncio.run(memory.auto_cold(conv.character_id, conv.id))
+    assert {r['kind'] for r in memory.rows(conv.character_id, conv.id) if r['mode'] == 'cold'} == {'summary', 'item'}
+    assert len(calls) == 2
+    config.auto_cold_kinds = []
+    store.save_setting('system_memory', config.model_dump(exclude={'prompt'}))
+    asyncio.run(memory.auto_cold(conv.character_id, conv.id))
+    assert len(calls) == 2
+
+
+def test_immediate_save_and_new_batch_do_not_wait_for_age(monkeypatch):
+    conv = store.create_conversation()
+    apply(conv, {'summary': {'content': '已有总结'}})
+    config = memory.settings()
+    config.auto_cold_enabled = True
+    config.auto_cold_mode = 'immediate'
+    config.auto_cold_kinds = ['summary']
+    config.auto_cold_hours = 8760
+    vector = role_memory.settings()
+    vector.vector.enabled = True
+    role_memory.save_settings(vector.model_dump())
+    async def embed(texts, config):
+        return [[1.0, 2.0]]
+    monkeypatch.setattr(role_memory, 'get_embeddings', embed)
+    monkeypatch.setattr(store, 'utcnow', lambda: END)
+    from app.memory.system_routes import save_settings
+    async def run():
+        await save_settings(config)
+        await memory._cold_tasks[conv.character_id]
+        assert memory.rows(conv.character_id, conv.id)[0]['mode'] == 'cold'
+        seed(conv.id)
+        fake_llm(monkeypatch, {'summary': {'content': '新总结'}})
+        await memory.batch(conv.character_id, conv.id, START, END)
+        assert all(r['mode'] == 'cold' for r in memory.rows(conv.character_id, conv.id))
+    asyncio.run(run())
+
+
+def test_cold_periodic_check_every_twenty_minutes(monkeypatch):
+    conv = store.create_conversation()
+    cfg = memory.settings()
+    cfg.auto_cold_enabled = True
+    store.save_setting('system_memory', cfg.model_dump(exclude={'prompt'}))
+    vector = role_memory.settings()
+    vector.vector.enabled = True
+    role_memory.save_settings(vector.model_dump())
+    tick = [0]
+    monkeypatch.setattr(memory, 'monotonic', lambda: tick[0])
+    calls = []
+    async def cold(character_id, cid):
+        calls.append(cid)
+    monkeypatch.setattr(memory, 'auto_cold', cold)
+    async def run():
+        await memory.maintenance()
+        await memory._cold_tasks[conv.character_id]
+        tick[0] = 300
+        await memory.maintenance()
+        assert len(calls) == 1
+        tick[0] = 1200
+        await memory.maintenance()
+        await memory._cold_tasks[conv.character_id]
+        assert len(calls) == 2
+    asyncio.run(run())
+
 def seed(cid,request='seed',when=START):
     conv=store.get_conversation(cid)
     store.begin_turn(cid,request,'奶奶把钥匙放在抽屉',conv.timezone,'web','OFF')

@@ -1,13 +1,13 @@
 # 项目维护与跨模块检查
 
-更新：2026-10-04。修改代码前阅读根PROJECT_CONTEXT与CHANGELOG，再核对源代码。用户后续指令优先。本文描述维护约定，不替代项目AGENTS规则。
+更新：2026-10-06。修改代码前阅读根PROJECT_CONTEXT与CODEX_CHANGELOG，再核对源代码。用户后续指令优先。本文描述维护约定，不替代项目AGENTS规则。
 
 ## 当前状态的单一来源
 
-- 根PROJECT_CONTEXT只保留现状、关键边界和最新验证；历史过程写CHANGELOG。
+- 根PROJECT_CONTEXT只保留现状、关键边界和最新验证；历史过程写CODEX_CHANGELOG。
 - 模块说明集中在docs/modules；字段定义集中在docs/reference/DATABASE_FIELDS.md；迁移步骤集中在docs/operations。
 - 不用“正文仍写旧行为，末尾追加覆盖规则”方式维护现行说明。替换正文的过期段落，必要时将旧文档原样归档。
-- app中的SKILL.md、PROTOCOL.md和memory/prompts/*.md是运行资源，修改会影响模型请求。说明写在docs，不移动这些文件到archive。
+- app中的SKILL.md、PROTOCOL.md、user/prompts/*.md和memory/prompts/*.md是运行资源，修改会影响模型请求。说明写在docs，不移动这些文件到archive。
 
 ## 修改影响表
 
@@ -15,6 +15,7 @@
 |---|---|
 | 聊天请求、编辑／重发／重生成 | chat/core、store、routes、request_metadata、images；static/chat；tests/chat |
 | 上下文顺序、历史范围、预设宏 | chat/core、chat/history、prompting/compiler；memory热区／召回；character；上下文调试与tests/prompting |
+| 全局用户资料／画像 | user/models、store、context、service、routes、prompt_files与prompts；static/user；skills/profile-update与runtime；chat/core、lifecycle、main；tests/user；数据库字段及用户指南 |
 | 日记／系统四表 | memory/role、system、schema、system_schema、各routes；skills/runtime；static/memory；字段说明；tests/memory |
 | 记忆向量与Rerank | vector_store、role.recall／hot_context、system.vector_ready／hot_context；模型签名、外部世界书冷区与tests/memory |
 | SQLite字段或身份 | 全部读写与迁移；scripts的两个部署迁移程序；请求重放、来源、分支、删除；字段说明与tests/integration |
@@ -24,6 +25,12 @@
 | 设备工具 | extensions/toy、app/extensions、tools/routes、chat/core；前端tools；连接代次、取消、实际动作标记、退出清理 |
 | 静态脚本移动 | index.html加载顺序／缓存参数；共享状态、事件绑定、测试读取路径；结构检查和Node启动烟测 |
 | 文件或说明移动 | docs/PROJECT_STRUCTURE文件清单、README入口、文档链接、.gitignore、相关测试路径 |
+
+## 功能分区
+
+用户 > 角色 > 会话是数据作用域，不表示模块互相嵌套。user管理唯一用户的当前认知与后台整合；character管理角色情绪；chat管理会话、消息与请求；memory管理角色日记、系统四表和长期记忆。用户功能不得再次堆入memory或character。
+
+新增功能先明确所属分区，再拆分模型、存储、纯上下文逻辑、后台服务与HTTP路由。对应前端、测试与说明分别归static/user、tests/user、docs/modules/user。运行提示词留app/user/prompts，画像技能留skills/definitions，协议调用将候选事务交给user/store。index加载顺序、用途表和目录索引必须同步。
 
 ## 前端脚本约定
 

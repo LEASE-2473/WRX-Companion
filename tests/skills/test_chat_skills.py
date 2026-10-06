@@ -36,7 +36,7 @@ def test_read_scope_and_catalog():
     with pytest.raises(ValueError):skills.perform_read(b.id,'read_memory',{'memory_id':r['id']})
     with pytest.raises(ValueError):skills.read_skill('../../config')
     with TestClient(app) as c:
-        assert len(c.get('/api/skills').json()['skills'])==2
+        assert {s['name'] for s in c.get('/api/skills').json()['skills']}=={'memory-read','diary-write','profile-update'}
         assert '即时日记' in c.get('/api/skills/diary-write').json()['content']
 
 def test_chat_reads_then_writes_atomically_and_replay(monkeypatch):

@@ -44,8 +44,11 @@ assert DATA_DIR == ROOT / 'data'
 assert (STATIC_DIR / 'index.html').is_file()
 assert PROMPT_DIR == ROOT / 'app/memory/prompts'
 assert read('system').strip()
+from app.user.prompt_files import PROMPT_DIR as USER_PROMPT_DIR, PROMPT as USER_PROMPT
+assert USER_PROMPT_DIR == ROOT / 'app/user/prompts'
+assert '后台用户画像整理者' in USER_PROMPT
 assert SKILLS == SKILL_DEFINITIONS_DIR
-assert {item['name'] for item in catalog()} == {'memory-read', 'diary-write'}
+assert {item['name'] for item in catalog()} == {'memory-read', 'diary-write', 'profile-update'}
 
 '''
     result = subprocess.run([sys.executable, '-c', code], cwd=tmp_path, env=env, capture_output=True, text=True)

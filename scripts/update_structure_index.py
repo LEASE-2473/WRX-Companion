@@ -27,7 +27,7 @@ def render():
         if not (ROOT / name).is_file():
             raise ValueError(f'用途表指向不存在的文件：{name}')
     out = ['# 当前项目目录与逐文件用途', '',
-           '更新：2026-10-05。此索引以实际文件生成；历史迁移说明在docs/archive。', '',
+           '更新：2026-10-06。此索引以实际文件生成；历史迁移说明在docs/archive。', '',
            '编辑用途表`docs/reference/FILE_PURPOSES.json`后运行`python scripts/update_structure_index.py`。',
            '`python scripts/check_structure.py`检查运行文件登记、索引同步及现行文档链接。', '',
            '## 根目录', '', '| 位置 | 用途 |', '|---|---|',

@@ -566,6 +566,31 @@
     ]
   ],
   [
+    "/api/user-profile",
+    [
+      "get",
+      "put"
+    ]
+  ],
+  [
+    "/api/user-profile/candidates/{candidate_id}",
+    [
+      "delete"
+    ]
+  ],
+  [
+    "/api/user-profile/import",
+    [
+      "post"
+    ]
+  ],
+  [
+    "/api/user-profile/summarize/{date}",
+    [
+      "post"
+    ]
+  ],
+  [
     "/api/vector-memory",
     [
       "get"

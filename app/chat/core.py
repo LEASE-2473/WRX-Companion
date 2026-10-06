@@ -103,6 +103,9 @@ class CompanionCore:
             "relationship": character.relationship, "speaking_style": character.speaking_style,
             "system_prompt": character.system_prompt, "user_persona": character.persona, "user_name": character.user_name,
         }
+        from app.user import store as user_profile
+        from app.user.context import context as user_context
+        user = user_profile.load()
         now = store.utcnow().astimezone(ZoneInfo(conversation.timezone))
         time_context = (f"[服务器提供的本轮时间：{now.isoformat(timespec="seconds")}；时区：{conversation.timezone}]")
         from app.character import state as role_state
@@ -113,10 +116,12 @@ class CompanionCore:
         if emotion_state and source == 'heartbeat':
             char_status_rules = emotion_cfg.chat_prompt + '\n' + role_state.PROTOCOL
         compiled = compile_prompt(preset, lorebook, len(history), history,
-                                  current_input, current_time=time_context, current_images=images, character_name=character.name, user_name=character.user_name,
+                                  current_input, current_time=time_context, current_images=images, character_name=character.name, user_name=user.name,
                                   char_status=char_status, char_status_rules=char_status_rules,
                                   marker_contents={"charDefinitions": "当前角色设定：\n" + json.dumps({k: v for k, v in definitions.items() if k not in {"user_persona", "user_name"}}, ensure_ascii=False),
-                                                   "userDefinitions": "用户设定：\n" + json.dumps({"name": character.user_name, "persona": character.persona}, ensure_ascii=False)})
+                                                   "userDefinitions": ""})
+        compiled.messages.insert(0, ChatMessage(role='system', content=user_context(user, current_input, history)))
+        compiled.trace['user_profile'] = {'scope': 'global', 'revision': user.revision}
         if not compiled.trace["history"]["current_user_included"]:
             raise ValueError("当前 Preset 必须启用 chatHistory，才能发送当前输入")
         compiled.trace["character"] = {"id": character.id, "name": character.name}
@@ -135,6 +140,10 @@ class CompanionCore:
         system_ids=[r['id'] for r in system_rows(character.id,conversation.id) if r['mode']=='hot']
         compiled.trace['role_memory'] = {'hot': hot_usage, 'hot_ids': [r['id'] for r in hot_records]+system_ids}
         compiled.trace['role_emotion'] = emotion_state
+        import re
+        for message in compiled.messages:
+            if message.role == 'system':
+                message.content = re.sub(r'\{\{\s*user\s*\}\}', lambda _: user.name, message.content, flags=re.I)
         compiled.trace["final_messages"] = [m.model_dump() for m in compiled.messages]
         compiled.trace['prompt_tokens']['value'] = estimate_prompt_tokens(compiled.messages)
         return compiled, preset

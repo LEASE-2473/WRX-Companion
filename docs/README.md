@@ -1,6 +1,6 @@
 # 文档导航
 
-更新：2026-10-04。这里是当前维护说明的唯一导航入口。程序会执行／读取的Markdown留在app；普通说明统一在docs。
+更新：2026-10-06。这里是当前维护说明的唯一导航入口。程序会执行／读取的Markdown留在app；普通说明统一在docs。
 
 ## 从这里开始
 
@@ -8,7 +8,7 @@
 - [当前使用指南](COMPANION_GUIDE.md)：启动、聊天、记忆、情绪、语音、搜索和设备工具。
 - [跨模块修改规则](MAINTENANCE.md)：修改哪些文件时必须同步哪些模块和验证。
 - [当前项目上下文](../PROJECT_CONTEXT.md)：项目当前状态和关键约定。
-- [变更记录](../CHANGELOG.md)：只追加已完成修改，不用于替代当前说明。
+- [Codex变更记录](../CODEX_CHANGELOG.md)：后续开发记录，原[历史变更记录](../CHANGELOG.md)保留，不用于替代当前说明。
 - [当前待办](../TODO.md)：尚未完成的功能。
 
 ## 模块说明
@@ -19,6 +19,7 @@
 | 日记、冷热记忆、来源与删除 | [角色记忆](modules/memory/ROLE_MEMORY.md) |
 | 系统四表、追溯、自动总结、外部世界书 | [系统记忆](modules/memory/SYSTEM_MEMORY.md) |
 | 可编辑运行提示词与文件映射 | [提示词](modules/memory/PROMPTS.md) |
+| 唯一用户、全局画像、两轮关键词触发与每日整理 | [user](modules/user/README.md) |
 | 十二情绪与管家 | [character](modules/character/README.md) |
 | 预设、宏与提示词世界书 | [prompting](modules/prompting/README.md) |
 | LLM、TTS、STT、Embedding、Rerank与usage | [providers](modules/providers/README.md) |
@@ -27,6 +28,7 @@
 | 联网搜索 | [search](modules/search/README.md) |
 | 应用技能与调用协议 | [技能参考](reference/SKILLS.md) |
 | Extension开发与HTTP/XML接入 | [开发指南](extensions/DEVELOPER_GUIDE.md) |
+| 双向接入／将陪伴AI接入其他项目（未实现设计） | [双向接入设计](extension/BIDIRECTIONAL_INTEGRATION.md) |
 | 角色设备工具 | [Toy正式接入](modules/tools/ROLE_TOOLS.md) |
 | SQLite与JSON字段 | [数据库字段](reference/DATABASE_FIELDS.md) |
 

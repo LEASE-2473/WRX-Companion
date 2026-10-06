@@ -680,6 +680,16 @@ SQLite外键：message_id → messages.id（ON DELETE CASCADE）；conversation_
 
 复合主键(request_id,action_index)；无SQLite外键，因记忆实体分布在多表。与记忆写入和请求完成处于同一事务，代替把材料SHA256当作记忆实体身份；不会额外调用模型。
 
+### 用户模块持久化
+
+源码归app/user/store.py和models.py，沿用同一个宿主SQLite，不按角色或会话分库。
+
+- settings.global_user_profile：name、core、entries(tag/keywords/content)、summary_enabled、llm_profile_id、summary_hour、summary_prompt、revision；revision保护并发整合。
+- user_profile_candidates：id INTEGER自增主键，request_id TEXT、action_index INTEGER、document TEXT非空，status TEXT非空默认pending；(request_id,action_index)唯一。document包含标签、关键词、正文及来源时间／角色／会话，仅用于追溯；资料全局共享。状态pending／reviewed／dismissed。
+- user_profile_jobs：date TEXT主键，status TEXT和document TEXT非空；date为北京时间整理目标日。状态running／done／stale／error／interrupted，document记录用量、时间或错误。
+
+本轮只移动代码归属，表名、字段、API与数据路径不变，没有对正式库执行迁移。
+
 ### 随机身份、摘要与时间约定
 
 内部随机身份统一16个安全随机Base62字符，分4组，每组4字、横杠分隔，共19字符；生成器使用secrets，浏览器使用crypto.getRandomValues并拒绝偏差抽样，碰撞重试。保留固定协议名／默认角色default、外部供应商资源标识、整数序号、自增主键及sqlite_sequence。导入资料原供应商编号留在metadata或raw_fields，内部切片／条目身份独立生成。历史映射位于部署副本相邻data-identity-map.json；settings.storage_identity_aliases和storage_legacy_requests仅用于保持原完整SHA256的旧请求比较语义。

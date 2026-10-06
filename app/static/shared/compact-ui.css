@@ -1,4 +1,4 @@
-/* 最后加载，覆盖各管理面板的大间距，同时保持原有配色与手机输入字号。 */
+/* 最后加载，统一各管理面板的紧凑间距与输入字号。 */
 .manager-dialog:not(#roleMemoryPanel) .dialog-header{padding:12px 16px;gap:10px}
 .manager-dialog:not(#roleMemoryPanel) .dialog-header h2{font-size:18px;margin:0}
 .manager-dialog:not(#roleMemoryPanel) .dialog-header h2::before,.manager-dialog:not(#roleMemoryPanel) .section-kicker{margin-bottom:3px}
@@ -20,3 +20,6 @@
 }
 
 #systemMemoryPanel .system-tabs button[aria-pressed=true]{background:#6e835f;color:white}
+
+/* 管理面板在桌面和窄屏使用同一小字号，不影响主聊天输入框。 */
+.manager-dialog textarea,.manager-dialog select,.manager-dialog input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]):not([type=reset]){font-size:12px!important;line-height:1.65}

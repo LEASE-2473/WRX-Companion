@@ -6,7 +6,7 @@
   const entry=document.createElement('button'); entry.textContent='系统记忆';
   document.querySelector('[data-open-panel="promptPanel"]').parentElement.append(entry);
   let character,cid,config,data,profiles=[],busy=false,tableKind='summary';
-  const folds={settings:false,scan:false,vector:false};
+  const folds={settings:false,scan:false,vector:false,autoCold:false,manualCold:false};
   const vectorDraft={start:'',end:'',kinds:new Set(['summary','person','item','agreement']),result:''};
   let scanStart='',scanEnd='';
   const body=dialog.querySelector('.system-memory-body'),status=dialog.querySelector('[role="status"]');
@@ -20,7 +20,7 @@
   function select(label,value,options,parent,change){const l=node('label',label,parent),s=node('select',undefined,l);for(const [v,t]of options){const o=node('option',t,s);o.value=v;}s.value=value;s.onchange=()=>change(s.value);}
   async function refresh(render=true){const wasRunning=data?.progress?.status==='running',books=data?.books||[];data=await api('/'+encodeURIComponent(character)+'?conversation_id='+encodeURIComponent(cid));data.books=books;if(render||(wasRunning&&data.progress?.status!=='running')){const records=await bookApi('/'+encodeURIComponent(character)+'?conversation_id='+encodeURIComponent(cid));data.books=records.records.filter(r=>r.kind==='book');draw();}else updateProgress();}
   function updateProgress(){const p=data.progress;const el=body.querySelector('.system-progress');if(el)el.textContent=p?`${p.status} · ${p.completed}/${p.total} · ${p.range||''}${p.error?' · '+p.error:''}`:'暂无追溯任务';}
-  function fold(key,title){const area=node('details');area.className='system-section';area.open=folds[key];area.ontoggle=()=>folds[key]=area.open;node('summary',title,area);return area;}
+  function fold(key,title,parent=body){const area=node('details',undefined,parent);area.className=parent===body?'system-section':'system-vector-section';area.open=folds[key];area.ontoggle=()=>folds[key]=area.open;node('summary',title,area);return area;}
   function draw(){body.replaceChildren();dialog.querySelector('h2').textContent='系统记忆 · '+(currentCharacter()?.name||character);
     if(tableKind!=='book'){
     const settings=fold('settings','自动填表与提示词');const grid=node('div',undefined,settings);grid.className='system-grid';
@@ -38,16 +38,34 @@
     button('停止追溯',async()=>{await api('/'+character+'/cancel','POST');await refresh(false);},scan);
     button('刷新表格',()=>refresh(),scan);node('p','',scan).className='system-progress';updateProgress();
     const vector=fold('vector','向量化管理');
-    node('p','按来源时间段与所选区间的交集筛选当前角色记录，开始包含、结束不包含。有效冷记录保持原状；只生成缺失或失效向量。',vector);
-    const vectorRange=node('div',undefined,vector);vectorRange.className='system-grid';
+    const autoCold=fold('autoCold','自动转冷',vector);
+    const autoGrid=node('div',undefined,autoCold);autoGrid.className='system-grid system-auto-cold-grid';
+    const enableCold=field('启用自动转冷（所有角色）',config.auto_cold_enabled,'checkbox',autoGrid,v=>config.auto_cold_enabled=v);enableCold.parentElement.className='system-cold-enable';
+    config.auto_cold_mode??='interval';
+    const modeRow=node('div',undefined,autoGrid);modeRow.className='system-cold-mode-field';node('span','转冷方式',modeRow);
+    const modeButton=node('button',undefined,modeRow);modeButton.type='button';modeButton.className='system-cold-mode';modeButton.setAttribute('role','switch');modeButton.setAttribute('aria-label','立即转冷');
+    node('span','间隔转冷',modeButton);node('span','立即转冷',modeButton);
+    const coldHours=field('间隔时间（小时，可填小数）',config.auto_cold_hours,'number',autoGrid,v=>config.auto_cold_hours=v);
+    coldHours.min='0.1';coldHours.max='8760';coldHours.step='any';
+    const syncMode=()=>{const immediate=config.auto_cold_mode==='immediate';modeButton.setAttribute('aria-checked',String(immediate));coldHours.parentElement.hidden=immediate;};
+    modeButton.onclick=()=>{config.auto_cold_mode=config.auto_cold_mode==='immediate'?'interval':'immediate';syncMode();};syncMode();
+    node('p','选择自动转冷的表（不选则不处理）：',autoCold);
+    config.auto_cold_kinds??=Object.keys(tables);
+    const autoChoices=node('div',undefined,autoCold);autoChoices.className='system-vector-tables';
+    for(const [kind,[label]] of Object.entries(tables)){const card=node('label',undefined,autoChoices);card.className='system-vector-card';const checkbox=node('input',undefined,card);checkbox.type='checkbox';checkbox.checked=config.auto_cold_kinds.includes(kind);checkbox.onchange=()=>{config.auto_cold_kinds=checkbox.checked?[...new Set([...config.auto_cold_kinds,kind])]:config.auto_cold_kinds.filter(k=>k!==kind);};node('span',label,card);}
+    node('p','保存后生效：立即转冷在保存设置或新记忆生成后直接开始向量化；间隔转冷按来源结束时间计龄，每20分钟检查，人物／物品沿用首次来源时间。无需保持页面打开。需先启用向量记忆，成功才转冷，失败保留热记录并每20分钟重试。',autoCold);
+    button('保存自动转冷设置',async()=>{config=await api('/settings','PUT',config);},autoCold);
+    const manualCold=fold('manualCold','手动转冷',vector);
+    node('p','按来源时间段与所选区间的交集筛选当前角色记录，开始包含、结束不包含。有效冷记录保持原状；只生成缺失或失效向量。',manualCold);
+    const vectorRange=node('div',undefined,manualCold);vectorRange.className='system-grid';
     field('开始（当前会话时区）',vectorDraft.start,'datetime-local',vectorRange,v=>vectorDraft.start=v);
     field('结束（当前会话时区）',vectorDraft.end,'datetime-local',vectorRange,v=>vectorDraft.end=v);
-    const choices=node('div',undefined,vector);choices.className='system-vector-tables';
+    const choices=node('div',undefined,manualCold);choices.className='system-vector-tables';
     for(const [kind,[label]] of Object.entries(tables)){const card=node('label',undefined,choices);card.className='system-vector-card';const checkbox=node('input',undefined,card);checkbox.type='checkbox';checkbox.checked=vectorDraft.kinds.has(kind);checkbox.onchange=()=>checkbox.checked?vectorDraft.kinds.add(kind):vectorDraft.kinds.delete(kind);node('span',label,card);}
-    const feedback=node('p',vectorDraft.result,vector);feedback.setAttribute('role','status');
+    const feedback=node('p',vectorDraft.result,manualCold);feedback.setAttribute('role','status');
     const selection=()=>{if(!vectorDraft.start||!vectorDraft.end)throw Error('请选择开始和结束时间');if(!vectorDraft.kinds.size)throw Error('至少选择一张表');return {conversation_id:cid,start:vectorDraft.start,end:vectorDraft.end,kinds:[...vectorDraft.kinds]};};
-    button('查看筛选数量',async()=>{const r=await api('/'+character+'/vector-selection','POST',selection());vectorDraft.result=`选中 ${r.selected} 条 · 已冷 ${r.already_cold} 条 · 需向量化 ${r.pending} 条`;feedback.textContent=vectorDraft.result;},vector);
-    button('按区间批量转冷',async()=>{feedback.textContent='正在逐条向量化并转冷，请等待…';const r=await api('/'+character+'/bulk-cold','POST',selection());vectorDraft.result=`选中 ${r.selected} 条 · 新转冷 ${r.converted} 条 · 冷记录重建向量 ${r.reindexed} 条 · 跳过 ${r.skipped} 条 · 失败 ${r.failed} 条`+(r.errors.length?'\n'+r.errors.map(e=>e.id+'：'+e.error).join('\n'):'');await refresh();},vector);
+    button('查看筛选数量',async()=>{const r=await api('/'+character+'/vector-selection','POST',selection());vectorDraft.result=`选中 ${r.selected} 条 · 已冷 ${r.already_cold} 条 · 需向量化 ${r.pending} 条`;feedback.textContent=vectorDraft.result;},manualCold);
+    button('按区间批量转冷',async()=>{feedback.textContent='正在逐条向量化并转冷，请等待…';const r=await api('/'+character+'/bulk-cold','POST',selection());vectorDraft.result=`选中 ${r.selected} 条 · 新转冷 ${r.converted} 条 · 冷记录重建向量 ${r.reindexed} 条 · 跳过 ${r.skipped} 条 · 失败 ${r.failed} 条`+(r.errors.length?'\n'+r.errors.map(e=>e.id+'：'+e.error).join('\n'):'');await refresh();},manualCold);
 
     }
     const tabs=node('nav');tabs.className='system-tabs';tabs.setAttribute('aria-label','系统记忆表');for(const [kind,[label]]of Object.entries({...tables,book:['外部世界书']})){const count=kind==='book'?data.books.length:data.rows.filter(r=>r.kind===kind).length;const b=button(label+' '+count,async()=>{tableKind=kind;draw();},tabs);b.setAttribute('aria-pressed',String(tableKind===kind));}

@@ -14,3 +14,21 @@
 
 #systemMemoryPanel .system-vector-card input[type=checkbox]{appearance:auto;-webkit-appearance:checkbox;width:18px;height:18px;border-radius:3px;background:transparent;accent-color:#687d5e}
 #systemMemoryPanel .system-vector-card input[type=checkbox]::after{content:none}
+
+#systemMemoryPanel .system-vector-section{margin-top:10px;padding:12px;border:1px solid #dce4d4;border-radius:12px;background:#f1f5ec}
+#systemMemoryPanel .system-vector-section>summary{display:list-item;cursor:pointer;font-size:13px;font-weight:600;line-height:1.5;color:#53634b}
+#systemMemoryPanel .system-vector-section[open]>summary{margin-bottom:10px}
+
+#systemMemoryPanel .system-cold-mode-field{display:grid;gap:4px;font-size:12px}
+#systemMemoryPanel .system-auto-cold-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:10px}
+#systemMemoryPanel .system-cold-enable{grid-column:1/-1}
+#systemMemoryPanel .system-cold-mode-field{grid-column:1;min-width:0}
+#systemMemoryPanel .system-cold-mode{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:0;isolation:isolate;min-height:34px;width:100%;margin:0;padding:3px;border-radius:999px;background:#e3e9dc;border:1px solid #d3ddc8}
+#systemMemoryPanel .system-cold-mode::before{content:"";position:absolute;z-index:-1;inset:3px auto 3px 3px;width:calc(50% - 3px);border-radius:999px;background:#fff;box-shadow:0 1px 4px #43503e18;transition:transform .18s}
+#systemMemoryPanel .system-cold-mode[aria-checked=true]::before{transform:translateX(100%);background:#708660}
+#systemMemoryPanel .system-cold-mode span{padding:3px 5px;line-height:1.5}
+#systemMemoryPanel .system-cold-mode[aria-checked=true] span:last-child{color:#fff}
+#systemMemoryPanel .system-cold-mode[aria-checked=false] span:first-child{font-weight:600;color:#43503e}
+#systemMemoryPanel .system-grid label[hidden]{display:none}
+#systemMemoryPanel .system-cold-mode:focus-visible{outline:2px solid #7c956b;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){#systemMemoryPanel .system-cold-mode::before{transition:none}}

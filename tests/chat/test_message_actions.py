@@ -96,12 +96,13 @@ def test_message_tts_uses_character_voice_and_leaves_text_usage_unchanged(llm, m
         assert client.delete('/api/provider-profiles/tts/clone').status_code == 409
         assert client.post(f'/api/conversations/{cid}/messages/{original.messages[0].id}/tts', json={}).status_code == 422
 
-def test_character_persona_respect_preset_markers(llm):
+def test_character_and_global_user_profile_are_separate(llm):
     char = store.save_character(Character(name='小月', personality='专属角色性格', persona='专属用户身份'))
     conversation = store.create_conversation(char.id)
     compiled, _ = core.context(conversation, char, '你好', 'web')
     assert compiled.trace['markers']['charDefinitions']['native_content_included']
-    assert compiled.trace['markers']['userDefinitions']['native_content_included']
+    assert not compiled.trace['markers']['userDefinitions']['native_content_included']
+    assert compiled.trace['user_profile']['scope'] == 'global'
     assert '专属角色性格' not in compiled.messages[0].content
     assert any('专属角色性格' in m.content for m in compiled.messages[1:])
     assert any('专属用户身份' in m.content for m in compiled.messages[1:])

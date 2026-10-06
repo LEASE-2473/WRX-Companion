@@ -116,7 +116,7 @@ function messageNode(role, content, message = {}) {
   const item = document.createElement('div');
   item.className = `message ${role}`;
   const label = document.createElement('div'); label.className = 'message-meta';
-  label.textContent = `${role === 'user' ? currentCharacter()?.user_name || '你' : currentCharacter()?.name || 'Assistant'}${message.source === 'heartbeat' ? ' · 主动消息' : ''} · ${message.timestamp ? new Date(message.timestamp).toLocaleString(undefined, {timeZone: currentConversation()?.timezone || localTimezone()}) : '时间未知'}`;
+  label.textContent = `${role === 'user' ? window.wrxUserName || '你' : currentCharacter()?.name || 'Assistant'}${message.source === 'heartbeat' ? ' · 主动消息' : ''} · ${message.timestamp ? new Date(message.timestamp).toLocaleString(undefined, {timeZone: currentConversation()?.timezone || localTimezone()}) : '时间未知'}`;
   const body = document.createElement('div'); body.className = 'message-body'; body.textContent = content;
   item.append(label, body);
   if (role === 'assistant') {
@@ -176,7 +176,7 @@ async function consumeEvents(response, consume) {
 
 function editCharacter(character) {
   editingCharacterId = character.id || null;
-  const fields = {characterName: 'name', characterSystem: 'system_prompt', characterPersonality: 'personality', characterBackground: 'background', characterRelationship: 'relationship', characterStyle: 'speaking_style', characterUserName: 'user_name', characterPersona: 'persona'};
+  const fields = {characterName: 'name', characterSystem: 'system_prompt', characterPersonality: 'personality', characterBackground: 'background', characterRelationship: 'relationship', characterStyle: 'speaking_style'};
   Object.entries(fields).forEach(([id, key]) => $(id).value = character[key] || '');
   characterOptions($('characterPreset'), settings.prompt_presets.presets, character.preset_id, '跟随当前预设');
   characterOptions($('characterLorebook'), settings.lorebooks.lorebooks, character.lorebook_id, '跟随当前世界书');
@@ -186,8 +186,11 @@ function editCharacter(character) {
 }
 
 async function saveCharacter() {
-  const value = {name: $('characterName').value, system_prompt: $('characterSystem').value, personality: $('characterPersonality').value, background: $('characterBackground').value, relationship: $('characterRelationship').value, speaking_style: $('characterStyle').value, user_name: $('characterUserName').value || '用户', persona: $('characterPersona').value, preset_id: $('characterPreset').value || null, lorebook_id: $('characterLorebook').value || null, llm_profile_id: $('characterLlm').value || null};
+  const value = {...currentCharacter(), name: $('characterName').value, system_prompt: $('characterSystem').value, personality: $('characterPersonality').value, background: $('characterBackground').value, relationship: $('characterRelationship').value, speaking_style: $('characterStyle').value, preset_id: $('characterPreset').value || null, lorebook_id: $('characterLorebook').value || null, llm_profile_id: $('characterLlm').value || null};
   value.tts_profile_id = $('characterTts').value || null;
+  delete value.id;
+  const original = characters.find(c => c.id === editingCharacterId);
+  value.user_name = original?.user_name || '用户'; value.persona = original?.persona || '';
   const saved = await companionApi(editingCharacterId ? `/api/characters/${editingCharacterId}` : '/api/characters', value, editingCharacterId ? 'PUT' : 'POST');
   activeCharacterId = saved.id; await loadConversations(); editCharacter(saved);
   $('characterState').textContent = '已保存；从下一轮生效';

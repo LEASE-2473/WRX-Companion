@@ -18,13 +18,14 @@ from app.prompting.routes import router as prompting_router
 from app.providers.routes import router as providers_router
 from app.settings.routes import router as settings_router
 from app.voice.routes import router as voice_router
+from app.user.routes import router as user_profile_router
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="WRX Companion", version=APP_VERSION, lifespan=lifespan)
 for router in (
     chat_router, extensions_router, tools_router, role_memory_router, system_memory_router,
     vector_memory_router, skills_router, character_router, autonomy_router,
-    prompting_router, providers_router, settings_router, voice_router,
+    prompting_router, providers_router, settings_router, voice_router, user_profile_router,
 ):
     app.include_router(router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

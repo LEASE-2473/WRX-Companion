@@ -1,6 +1,6 @@
 # 当前项目目录与逐文件用途
 
-更新：2026-10-05。此索引以实际文件生成；历史迁移说明在docs/archive。
+更新：2026-10-06。此索引以实际文件生成；历史迁移说明在docs/archive。
 
 编辑用途表`docs/reference/FILE_PURPOSES.json`后运行`python scripts/update_structure_index.py`。
 `python scripts/check_structure.py`检查运行文件登记、索引同步及现行文档链接。
@@ -27,6 +27,8 @@
 |---|---|
 | [.gitignore](../.gitignore) | 私人数据／环境／研究／本地历史资料忽略约定 |
 | [CHANGELOG.md](../CHANGELOG.md) | 按任务追加的中文变更历史 |
+| [Claude Audit Report.md](../Claude Audit Report.md) | 根目录辅助文件；修改前核对内容 |
+| [CODEX_CHANGELOG.md](../CODEX_CHANGELOG.md) | 根目录辅助文件；修改前核对内容 |
 | [PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md) | 中文当前状态、核心约定与最新验证 |
 | [pytest.ini](../pytest.ini) | 仅收集tests目录的测试配置 |
 | [README.md](../README.md) | 项目介绍、部署与文档导航入口 |
@@ -85,6 +87,7 @@
 | 文件 | 用途 |
 |---|---|
 | [app/common/__init__.py](../app/common/__init__.py) | Python包入口／模块分区标记 |
+| [app/common/dialogue.py](../app/common/dialogue.py) | 用户画像和角色日记共享的纯对话正文清理。 |
 | [app/common/errors.py](../app/common/errors.py) | 统一API异常转换 |
 | [app/common/identity.py](../app/common/identity.py) | 安全Base62实体身份与碰撞检查 |
 | [app/common/time_format.py](../app/common/time_format.py) | UTC秒时间规范化与持久格式 |
@@ -165,6 +168,7 @@
 | [app/skills/configuration.py](../app/skills/configuration.py) | 内置技能启停与注入方式配置 |
 | [app/skills/definitions/diary-write/SKILL.md](../app/skills/definitions/diary-write/SKILL.md) | AI自主即时日记的运行技能 |
 | [app/skills/definitions/memory-read/SKILL.md](../app/skills/definitions/memory-read/SKILL.md) | 按需搜索／读取当前角色可见记忆的运行技能 |
+| [app/skills/definitions/profile-update/SKILL.md](../app/skills/definitions/profile-update/SKILL.md) | 普通文本/XML追加全局用户画像候选的技能说明。 |
 | [app/skills/PROTOCOL.md](../app/skills/PROTOCOL.md) | 普通聊天模型读取／写入的共享运行协议，不是维护说明 |
 | [app/skills/routes.py](../app/skills/routes.py) | 当前允许技能目录／正文只读接口 |
 | [app/skills/runtime.py](../app/skills/runtime.py) | 允许目录、按需读取、模型调用块、日记写入事务与幂等 |
@@ -194,6 +198,8 @@
 | [app/static/shared/styles.css](../app/static/shared/styles.css) | 页面公共基础样式 |
 | [app/static/tools/role-tools.css](../app/static/tools/role-tools.css) | 设备工具卡片与面板样式 |
 | [app/static/tools/role-tools.js](../app/static/tools/role-tools.js) | 扩展与技能动态管理界面 |
+| [app/static/user/user-profile.css](../app/static/user/user-profile.css) | 用户信息专属字体、折叠区、彩色标签与固定保存栏样式。 |
+| [app/static/user/user-profile.js](../app/static/user/user-profile.js) | 用户信息、彩色标签、候选与后台整理界面交互。 |
 | [app/static/voice/voice-ui.js](../app/static/voice/voice-ui.js) | 麦克风采集、实时STT、语音请求、音频播放、录音控件与热键 |
 
 ### tools
@@ -207,6 +213,19 @@
 | [app/tools/toy/protocol.py](../app/tools/toy/protocol.py) | 旧Python导入兼容；实现位于独立extensions/toy |
 | [app/tools/toy/records.py](../app/tools/toy/records.py) | 旧Python导入兼容；实现位于独立extensions/toy |
 | [app/tools/toy/service.py](../app/tools/toy/service.py) | 旧Python导入兼容；实现位于独立extensions/toy |
+
+### user
+
+| 文件 | 用途 |
+|---|---|
+| [app/user/__init__.py](../app/user/__init__.py) | 唯一用户全局资料功能分区入口。 |
+| [app/user/context.py](../app/user/context.py) | 纯上下文编排：核心常驻、当前与上一轮用户关键词激活。 |
+| [app/user/models.py](../app/user/models.py) | 用户画像与标签字段、输入校验和默认设置。 |
+| [app/user/prompt_files.py](../app/user/prompt_files.py) | 用户默认运行提示词加载与旧默认提示词识别。 |
+| [app/user/prompts/profile_summary.md](../app/user/prompts/profile_summary.md) | 后台用户画像整合、精炼与关键词提取的默认运行提示词。 |
+| [app/user/routes.py](../app/user/routes.py) | 全局用户信息管理与按日期整理HTTP路由。 |
+| [app/user/service.py](../app/user/service.py) | 完整当日材料的画像整理、模型调用、并发保护与每日调度。 |
+| [app/user/store.py](../app/user/store.py) | 全局用户资料、候选、任务状态及旧资料升级的SQLite持久化。 |
 
 ### voice
 
@@ -228,6 +247,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 |---|---|
 | [docs/COMPANION_GUIDE.md](../docs/COMPANION_GUIDE.md) | 当前版本使用与验收 |
 | [docs/experiments/EMOTION_LAB.md](../docs/experiments/EMOTION_LAB.md) | 独立情绪实验台 |
+| [docs/extension/BIDIRECTIONAL_INTEGRATION.md](../docs/extension/BIDIRECTIONAL_INTEGRATION.md) | 双向接入设计：将陪伴 AI 接入其他项目 |
 | [docs/extensions/DEVELOPER_GUIDE.md](../docs/extensions/DEVELOPER_GUIDE.md) | Extension 开发与接入指南 |
 | [docs/images/autonomy-archived.jpg](../docs/images/autonomy-archived.jpg) | 说明配图／参考资源 |
 | [docs/images/chat-ui-offline-preview.jpg](../docs/images/chat-ui-offline-preview.jpg) | 说明配图／参考资源 |
@@ -250,6 +270,7 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | [docs/modules/search/README.md](../docs/modules/search/README.md) | 联网搜索 |
 | [docs/modules/settings/README.md](../docs/modules/settings/README.md) | 全局设置与旧向量兼容边界 |
 | [docs/modules/tools/ROLE_TOOLS.md](../docs/modules/tools/ROLE_TOOLS.md) | Toy Extension 正式接入 |
+| [docs/modules/user/README.md](../docs/modules/user/README.md) | 全局用户信息与画像 |
 | [docs/modules/voice/README.md](../docs/modules/voice/README.md) | 辅助录音、STT与音频播放 |
 | [docs/operations/DATABASE_MIGRATION.md](../docs/operations/DATABASE_MIGRATION.md) | 数据库迁移、部署与回滚 |
 | [docs/operations/DEPLOYMENT_SNAPSHOTS.md](../docs/operations/DEPLOYMENT_SNAPSHOTS.md) | 现有数据与部署副本清单 |
@@ -324,6 +345,8 @@ archive保存原文历史，可能含旧路径，详见[归档索引](archive/RE
 | [tests/ui/role_tools_ui_test.cjs](../tests/ui/role_tools_ui_test.cjs) | 设备面板加载、关闭和UI生命周期回归 |
 | [tests/ui/temperature_ui_test.cjs](../tests/ui/temperature_ui_test.cjs) | 前端温度零值、非法输入及其他参数保留回归 |
 | [tests/ui_preview.py](../tests/ui_preview.py) | 2474模拟模型／搜索／语音界面预览，不是正式服务 |
+| [tests/user/__init__.py](../tests/user/__init__.py) | 测试包标记 |
+| [tests/user/test_user_profile.py](../tests/user/test_user_profile.py) | 离线回归：user_profile |
 
 ## scripts：维护入口
 

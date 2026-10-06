@@ -20,11 +20,16 @@ async def lifespan(app):
     scheduler = asyncio.create_task(run_scheduler())
     from app.memory.role import scheduler as run_memory_scheduler
     memory_scheduler = asyncio.create_task(run_memory_scheduler())
+    from app.user.service import scheduler as run_profile_scheduler
+    from app.user.store import recover as recover_user_profile
+    recover_user_profile()
+    profile_scheduler = asyncio.create_task(run_profile_scheduler())
     try:
         yield
     finally:
         scheduler.cancel()
         memory_scheduler.cancel()
+        profile_scheduler.cancel()
         cleanup_scheduler.cancel()
         from app.memory.system import shutdown as shutdown_system_memory
         await shutdown_system_memory()
@@ -33,6 +38,7 @@ async def lifespan(app):
         from app.character.state import shutdown as shutdown_emotions
         await shutdown_emotions()
         await asyncio.gather(memory_scheduler, return_exceptions=True)
+        await asyncio.gather(profile_scheduler, return_exceptions=True)
         await asyncio.gather(scheduler, return_exceptions=True)
         await asyncio.gather(cleanup_scheduler, return_exceptions=True)
         await core.shutdown()

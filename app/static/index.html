@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WRX Companion</title><link rel="stylesheet" href="/static/shared/styles.css?v=20261001-companion"></head>
 <body>
-<link rel="stylesheet" href="/static/chat/chat-ui.css?v=20261003-compact-20261001-action-linebox">
+<link rel="stylesheet" href="/static/chat/chat-ui.css?v=20261006-auto-grow">
 <main class="chat-app">
   <aside class="chat-sidebar" aria-label="角色与会话">
     <div class="brand"><span class="brand-mark">W</span><div><strong>WRX Companion</strong><small id="mode">2.0</small></div></div>
@@ -12,6 +12,7 @@
     <div id="conversationList" class="conversation-list"></div>
     <select id="conversationSelect" aria-label="当前会话" hidden></select><button id="clearConversation" hidden>重新开始</button>
     <nav class="sidebar-settings" aria-label="设置">
+      <button data-open-panel="userInfoPanel">用户信息</button>
       <button data-open-panel="promptPanel">预设</button><button data-open-panel="lorebookPanel">世界书</button>
       <button data-open-panel="providerPanel">模型与语音</button><button data-open-panel="searchPanel">联网搜索</button>
       <button data-open-panel="heartbeatPanel">主动联系</button><button data-open-panel="contextPanel">上下文</button>
@@ -22,9 +23,9 @@
     <div id="companionStateBar" class="companion-state-bar" aria-live="polite" hidden><span class="emotion-change-label">最新一轮情绪</span><span id="companionStateText"></span></div>
     <div id="chatScroll" class="chat-scroll"><div id="chat" role="log" aria-label="聊天消息" aria-live="polite"></div></div>
     <div class="composer-wrap"><span id="searchTurnState" class="hint"></span>
-      <div class="composer"><label class="composer-label"><span class="sr-only">文字输入</span><textarea id="textInput" rows="3" placeholder="和她说点什么…"></textarea></label>
+      <div class="composer"><label class="composer-label"><span class="sr-only">文字输入</span><textarea id="textInput" rows="1" placeholder="和她说点什么…"></textarea></label>
         <div id="imageDrafts" class="image-drafts"></div><input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
-        <div class="composer-toolbar"><button id="attachImages" type="button">图片</button><label class="search-mode-label"><span class="sr-only">本轮联网</span><select id="searchMode"><option value="AUTO">◎ 自动联网</option><option value="ON">◎ 强制搜索</option><option value="OFF">◎ 不联网</option></select></label><button data-open-panel="voicePanel">麦克风</button><span class="composer-spacer"></span><button id="stopText" type="button" hidden>停止生成 ■</button><button id="sendText" class="primary-button">发送 ↑</button></div>
+        <div class="composer-toolbar"><button id="attachImages" type="button">图片</button><label class="search-mode-label"><span class="sr-only">本轮联网</span><select id="searchMode"><option value="AUTO">◎ 自动联网</option><option value="ON">◎ 强制搜索</option><option value="OFF" selected>◎ 不联网</option></select></label><button data-open-panel="voicePanel">麦克风</button><span class="composer-spacer"></span><button id="stopText" type="button" hidden>停止生成 ■</button><button id="sendText" class="primary-button">发送 ↑</button></div>
       </div><div class="composer-footer"><span id="conversationSummary"></span><span id="composerUsage" class="composer-usage"></span><span id="textInputState" class="hint">Enter 发送 · Shift + Enter 换行</span></div>
     </div><button id="toggleConversation" hidden>展开全部</button>
   </section>
@@ -34,17 +35,41 @@
 <dialog id="messageEditPanel" class="manager-dialog"><div class="dialog-header"><h2 id="messageEditTitle">编辑消息</h2><button data-close-panel="messageEditPanel">关闭</button></div><div class="dialog-scroll"><p class="hint">原地重新发送：成功后替换用户消息及紧随的 AI 回复，失败或停止保留原文；后续消息保留且不会自动重写。也可保存到新分支，保留原对话；编辑 AI 回复只保存文字。</p><label>消息内容<textarea id="messageEditContent" rows="10"></textarea></label><button id="resendMessageEdit" class="primary-button">原地重新发送</button><button id="saveMessageEdit" class="primary-button">保存到新分支</button><span id="messageEditState" class="hint"></span></div></dialog>
 <dialog id="messageVoicePanel" class="manager-dialog"><div class="dialog-header"><h2>朗读这条回复</h2><button data-close-panel="messageVoicePanel">关闭</button></div><div class="dialog-scroll"><label>本次朗读音色<select id="messageVoiceProfile"></select></label><p class="hint">默认使用角色绑定音色。可在角色设定中保存默认 TTS，或在这里为本次播放选择音色。</p><button id="playMessageVoice" class="primary-button">生成并播放</button><span id="messageVoiceState" class="hint"></span></div></dialog>
 <dialog id="characterPanel" class="manager-dialog">
-  <div class="dialog-header"><h2>角色与用户</h2><button data-close-panel="characterPanel">关闭</button></div>
+  <div class="dialog-header"><h2>角色设定</h2><button data-close-panel="characterPanel">关闭</button></div>
   <div class="dialog-scroll">
     <div class="button-row"><button id="newCharacter">新角色</button><button id="copyCharacter">复制当前角色</button><button id="saveCharacter" class="primary-button">保存角色</button><button id="deleteCharacter" class="danger-button">删除角色</button></div>
     <p class="hint">每个角色拥有自己的会话。设定保存后从下一轮生效；已有会话的角色可以编辑，但不能删除。</p>
     <label>名称<input id="characterName" maxlength="100"></label>
     <label>核心提示词<textarea id="characterSystem" rows="4" placeholder="她是谁，以及她应如何与你相处"></textarea></label>
     <div class="manager-primary"><label>性格<textarea id="characterPersonality"></textarea></label><label>背景<textarea id="characterBackground"></textarea></label><label>关系<textarea id="characterRelationship"></textarea></label><label>说话风格<textarea id="characterStyle"></textarea></label></div>
-    <div class="manager-primary"><label>你的称呼<input id="characterUserName"></label><label>用户 Persona<textarea id="characterPersona" placeholder="希望这个角色了解的用户身份"></textarea></label></div>
     <div class="manager-primary"><label>绑定预设<select id="characterPreset"></select></label><label>绑定世界书<select id="characterLorebook"></select></label></div>
     <label>绑定 LLM<select id="characterLlm"></select></label><label>默认朗读音色<select id="characterTts"></select></label><span id="characterState" class="hint"></span>
   </div>
+</dialog>
+<dialog id="userInfoPanel" class="manager-dialog">
+  <div class="dialog-header"><h2>用户信息</h2><button data-close-panel="userInfoPanel">关闭</button></div>
+  <div class="dialog-scroll">
+    <p class="profile-intro"><span class="profile-global-badge">全局共享</span>所有角色与会话都认识同一个你。</p>
+    <div class="profile-transfer"><button id="importUserProfile" type="button">导入 JSON</button><button id="exportUserProfile" type="button">导出 JSON</button><input id="userProfileFile" type="file" accept=".json,application/json" hidden><span class="hint">跨服务器迁移资料，模型设置留在本机。</span></div>
+    <section class="profile-section"><div class="profile-section-heading"><h3>基本信息</h3><span>每轮常驻</span></div>
+      <label>你的称呼<input id="userProfileName" maxlength="100" placeholder="用于 {{user}} 宏和记忆总结"></label>
+      <label>始终记住的核心信息<textarea id="userProfileCore" rows="3" placeholder="每轮都应知道的身份、重要约定和交流偏好"></textarea></label>
+    </section>
+    <section class="profile-section"><div class="profile-section-heading"><h3>标签画像</h3><button id="addUserProfileEntry" type="button">＋ 新标签</button></div>
+      <p class="hint">点击彩色标签查看与编辑。只匹配你当前和上一轮发言，AI 回复不触发；未填关键词则只保存。</p>
+      <div id="userProfileEntries"></div>
+    </section>
+    <details class="profile-fold"><summary><span>待整理的候选信息<small>聊天中发现的新信息，等待确认与整合</small></span></summary><div class="profile-fold-body" id="userProfileCandidates"></div></details>
+    <details class="profile-fold"><summary><span>后台每日整理<small>整理时间、独立模型与运行记录</small></span></summary><div class="details-body profile-fold-body">
+      <label class="inline-check"><input id="userProfileEnabled" type="checkbox">每天整理一次（北京时间）</label>
+      <label>画像整理模型<select id="userProfileModel"></select></label>
+      <label>整理时间（小时，处理前一天完整对话）<input id="userProfileHour" type="number" min="0" max="23"></label>
+      <details class="profile-prompt-fold"><summary>编辑总结提示词</summary><label>后台总结提示词<textarea id="userProfilePrompt" rows="6"></textarea></label></details>
+      <p class="hint">发送完整画像、待整理候选和当天所有角色的对话。称呼与核心信息由你维护，后台只整合标签画像。</p>
+      <label>手动整理日期<input id="userProfileDate" type="date"></label><button id="summarizeUserProfile">整理该日</button><div id="userProfileJobs" class="hint"></div>
+    </div></details>
+  </div>
+  <div class="profile-footer"><span id="userProfileState" class="hint" role="status"></span><button id="saveUserProfile" class="primary-button">保存用户信息</button></div>
 </dialog>
 <dialog id="searchPanel" class="manager-dialog">
   <div class="dialog-header"><h2>联网搜索</h2><button data-close-panel="searchPanel">关闭</button></div>
@@ -176,18 +201,20 @@
 <script src="/static/shared/state.js?v=20261004-organized"></script>
 <script src="/static/settings/app.js?v=20261004-separate-providers"></script>
 <script src="/static/voice/voice-ui.js?v=20261004-organized"></script>
-<script src="/static/chat/companion.js?v=20261004-message-limit"></script>
-<script src="/static/chat/chat-ui.js?v=20261005-extension"></script>
-<link rel="stylesheet" href="/static/settings/settings-design.css?v=20261001-settings-design">
+<script src="/static/chat/companion.js?v=20261006-global-profile"></script>
+<script src="/static/user/user-profile.js?v=20261006-prompt-button"></script>
+<script src="/static/chat/chat-ui.js?v=20261006-auto-grow"></script>
+<link rel="stylesheet" href="/static/settings/settings-design.css?v=20261006-user-module">
+<link rel="stylesheet" href="/static/user/user-profile.css?v=20261006-prompt-button">
 <link rel="stylesheet" href="/static/memory/role-memory.css?v=20261003-compact">
 <script src="/static/memory/role-memory.js?v=20261004-separate-providers"></script>
-<link rel="stylesheet" href="/static/memory/system-memory.css?v=20261004-bulk-20261003-v2">
-<script src="/static/memory/system-memory.js?v=20261004-bulk-20261004-four-tables-20261003-books"></script>
+<link rel="stylesheet" href="/static/memory/system-memory.css?v=20261006-cold-row">
+<script src="/static/memory/system-memory.js?v=20261006-cold-row"></script>
 <link rel="stylesheet" href="/static/autonomy/autonomy.css?v=20261001-travel">
 <script src="/static/autonomy/autonomy.js?v=20261001-archived"></script>
 <link rel="stylesheet" href="/static/character/role-state.css?v=20261001-role-state-r4">
 <script src="/static/character/role-state.js?v=20261002-model-heartbeat"></script>
 <link rel="stylesheet" href="/static/chat/context-debug.css?v=20261001"><script src="/static/chat/context-debug.js?v=20261001"></script>
 <link rel="stylesheet" href="/static/tools/role-tools.css?v=20261005-extension-tabs"><script src="/static/tools/role-tools.js?v=20261005-extension-tabs"></script>
-<link rel="stylesheet" href="/static/shared/compact-ui.css?v=20261003">
+<link rel="stylesheet" href="/static/shared/compact-ui.css?v=20261006-small-fields">
 </body></html>

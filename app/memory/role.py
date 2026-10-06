@@ -349,11 +349,7 @@ def claim(jid, character_id, cid):
         db.execute('INSERT OR REPLACE INTO memory_jobs VALUES (?,?,?,?,?,?)', (jid, character_id, cid, 'running', utc_seconds(store.utcnow()), '{}'))
         return True
 
-def plain_dialogue(text):
-    text = re.sub(r'<(?:emotion_update|app_call)\b[^>]*>.*?</(?:emotion_update|app_call)>', '', text, flags=re.S)
-    text = re.sub(r'<(?:emotion_update|app_call)\b.*$', '', text, flags=re.S)
-    return re.sub(r'!\[[^\]]*\]\([^)]*\)|<img\b[^>]*>', '', text, flags=re.I).strip()
-
+from app.common.dialogue import plain_dialogue
 
 def time_window(date, timezone, start_time='00:00', end_time='24:00'):
     day = datetime.strptime(date, '%Y-%m-%d').date(); tz = ZoneInfo(timezone)
@@ -379,6 +375,12 @@ async def summarize_diary(llm, prompt, input_data, audit, progress):
     async def run(items, merge=False):
         data = dict(input_data, messages=items)
         instruction = prompt_files.read('diary_merge') if merge else prompt
+        from app.user.store import load as load_user
+        user_name = load_user().name
+        data['user_name'] = user_name
+        instruction = instruction.replace('{{user}}', user_name)
+        if user_name != '用户':
+            instruction += '\n用户的全局称呼是：' + user_name + '。日记涉及对方时优先使用此称呼。'
         progress()
         try:
             async with asyncio.timeout(180):

@@ -3,6 +3,8 @@ from app.common.time_format import utc_seconds
 import asyncio
 import hashlib
 import json
+import logging
+from time import monotonic
 from datetime import datetime, timedelta, timezone
 from app.common.identity import new_id
 from typing import Literal
@@ -17,6 +19,10 @@ from app.memory import system_schema as schema
 
 class Settings(BaseModel):
     enabled: bool = False
+    auto_cold_enabled: bool = False
+    auto_cold_mode: Literal['interval','immediate'] = 'interval'
+    auto_cold_hours: float = Field(default=3, ge=0.1, le=8760, allow_inf_nan=False)
+    auto_cold_kinds: list[Literal['summary','person','item','agreement']] = Field(default_factory=lambda: list(schema.TABLES), max_length=4)
     interval_minutes: int = Field(default=60, ge=1, le=10080)
     delay_seconds: float = Field(default=2, ge=0, le=60)
     scope: Literal['character'] = 'character'
@@ -125,6 +131,8 @@ def apply(db, character_id, cid, scope, start, end, output):
 _locks = {}
 _tasks = {}
 _progress = {}
+_cold_tasks = {}
+_cold_last_checks = {}
 
 async def batch(character_id, cid, start, end, config=None):
     from app.memory import role as memory
@@ -152,7 +160,11 @@ async def batch(character_id, cid, start, end, config=None):
                 existing = [{k:v for k,v in r.items() if k not in ('vector','vector_signature')} for r in rows(character_id,cid) if r['mode']=='hot' and r['scope']==config.scope]
                 payload = {'character':store.get_character(character_id).name,'timezone':conv.timezone,'existing':[{k:v for k,v in r.items() if k not in ('character_id','conversation_id','scope','mode','sequence','vectorized') and v not in ('',None)} for r in existing],'messages':[{'time':dt.astimezone(ZoneInfo(conv.timezone)).isoformat(),'role':m.role,'content':memory.plain_dialogue(m.content)} for dt,m,source in messages]}
                 async with asyncio.timeout(180):
-                    raw = await llm.complete([ChatMessage(role='system',content=config.prompt),ChatMessage(role='user',content=store.dumps(payload))])
+                    from app.user.store import load
+                    user = load()
+                    payload['user_name'] = user.name
+                    prompt = config.prompt.replace('{{user}}', user.name) + '\n用户的全局称呼是：' + user.name + '。总结中的人物称呼优先使用该名称，不要统一写成“用户”。'
+                    raw = await llm.complete([ChatMessage(role='system',content=prompt),ChatMessage(role='user',content=store.dumps(payload))])
                 raw = raw.strip()
                 if raw.startswith('```'): raw=raw.split('\n',1)[1].rsplit('```',1)[0]
                 output = Output.model_validate_json(raw)
@@ -163,6 +175,11 @@ async def batch(character_id, cid, start, end, config=None):
                     if current!=existing: raise ValueError('填表期间记忆已被编辑，请重试该批次')
                     apply(db,character_id,cid,config.scope,start.astimezone(ZoneInfo(conv.timezone)).isoformat(),end.astimezone(ZoneInfo(conv.timezone)).isoformat(),output)
                     db.execute("UPDATE system_memory_batches SET status='done' WHERE id=?",(jid,))
+                if settings().auto_cold_mode == 'immediate':
+                    try:
+                        await auto_cold(character_id, cid, wait_scan=False)
+                    except Exception:
+                        logging.exception('已生成系统记忆，但立即转冷任务失败：%s', character_id)
                 return 'done'
             with store.database() as db: db.execute("UPDATE system_memory_batches SET status='empty' WHERE id=?",(jid,))
             return 'empty'
@@ -219,7 +236,7 @@ async def change_mode(character_id,cid,rid,mode):
     with store.database() as db:
         table,sequence=schema.locate(rid)
         current=db.execute(f'SELECT * FROM {table} WHERE sequence=? AND character_id=?',(sequence,character_id)).fetchone()
-        if not current or text(schema.decode(row['kind'],current))!=text(row):raise ValueError('记录已变更，请重试')
+        if not current or current['mode']!=row['mode'] or text(schema.decode(row['kind'],current))!=text(row):raise ValueError('记录已变更，请重试')
         db.execute(f'UPDATE {table} SET mode=?,vector=?,vector_signature=? WHERE sequence=? AND character_id=?',(mode,schema.pack(vector) if vector is not None else None,signature,sequence,character_id))
 
 def vector_ready(row,config):
@@ -257,8 +274,59 @@ async def bulk_cold(character_id,cid,start,end,kinds):
             result['failed']+=1;result['errors'].append({'id':row['id'],'error':str(exc)[:300]})
     return result
 
+async def auto_cold(character_id, cid, wait_scan=True):
+    """按来源窗口结束时间转冷；失败保留热记录，下轮调度重试。"""
+    from app.memory import role as memory
+    scan_task = _tasks.get(character_id)
+    if wait_scan and scan_task is not None and not scan_task.done():
+        await asyncio.shield(asyncio.gather(scan_task, return_exceptions=True))
+    for row in rows(character_id, cid):
+        scan_task = _tasks.get(character_id)
+        if wait_scan and scan_task is not None and not scan_task.done():
+            return
+        config = settings()
+        if not config.auto_cold_enabled or not memory.settings().vector.enabled:
+            return
+        if row['mode'] != 'hot' or row['kind'] not in config.auto_cold_kinds:
+            continue
+        try:
+            cutoff = store.utcnow() - timedelta(hours=config.auto_cold_hours)
+            if config.auto_cold_mode == 'interval' and parse_time(row['range_end'], 'UTC') > cutoff:
+                continue
+            await change_mode(character_id, cid, row['id'], 'cold')
+        except Exception:
+            logging.exception('系统记忆自动转冷失败：%s / %s', character_id, row['id'])
+
+
+def schedule_cold(character_id, cid, force=False):
+    config = settings()
+    from app.memory import role as memory
+    if not config.auto_cold_enabled or not config.auto_cold_kinds or not memory.settings().vector.enabled:
+        return
+    task = _cold_tasks.get(character_id)
+    if task is not None and not task.done():
+        return
+    now = monotonic()
+    if not force and now - _cold_last_checks.get(character_id, float('-inf')) < 1200:
+        return
+    if task is not None and not task.cancelled() and task.exception():
+        logging.error('系统记忆自动转冷任务失败：%s', task.exception())
+    _cold_last_checks[character_id] = now
+    _cold_tasks[character_id] = asyncio.create_task(auto_cold(character_id, cid))
+
+
+def schedule_all_cold(force=False):
+    seen = set()
+    for conv in store.list_conversations():
+        if conv.character_id not in seen:
+            seen.add(conv.character_id)
+            schedule_cold(conv.character_id, conv.id, force=force)
+
+
 async def maintenance():
     config=settings()
+    if config.auto_cold_enabled:
+        schedule_all_cold()
     if not config.enabled: return
     now=store.utcnow()
     seen=set()
@@ -284,7 +352,7 @@ async def maintenance():
             start_scan(conv.character_id,conv.id,start,end,config)
 
 async def shutdown():
-    tasks=[t for t in _tasks.values() if not t.done()]
+    tasks=[t for t in [*_tasks.values(), *_cold_tasks.values()] if not t.done()]
     for t in tasks: t.cancel()
     if tasks: await asyncio.gather(*tasks,return_exceptions=True)
 

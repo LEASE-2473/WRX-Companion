@@ -162,5 +162,17 @@
   "app/extensions/routes.py": "管理API与同源应用代理",
   "app/extensions/__init__.py": "扩展模块包入口",
   "app/skills/configuration.py": "内置技能启停与注入方式配置",
-  "extensions/README.md": "独立扩展安装与仓库边界说明"
+  "extensions/README.md": "独立扩展安装与仓库边界说明",
+  "app/skills/definitions/profile-update/SKILL.md": "普通文本/XML追加全局用户画像候选的技能说明。",
+  "app/user/__init__.py": "唯一用户全局资料功能分区入口。",
+  "app/user/models.py": "用户画像与标签字段、输入校验和默认设置。",
+  "app/user/store.py": "全局用户资料、候选、任务状态及旧资料升级的SQLite持久化。",
+  "app/user/context.py": "纯上下文编排：核心常驻、当前与上一轮用户关键词激活。",
+  "app/user/service.py": "完整当日材料的画像整理、模型调用、并发保护与每日调度。",
+  "app/user/routes.py": "全局用户信息管理与按日期整理HTTP路由。",
+  "app/user/prompt_files.py": "用户默认运行提示词加载与旧默认提示词识别。",
+  "app/user/prompts/profile_summary.md": "后台用户画像整合、精炼与关键词提取的默认运行提示词。",
+  "app/static/user/user-profile.js": "用户信息、彩色标签、候选与后台整理界面交互。",
+  "app/static/user/user-profile.css": "用户信息专属字体、折叠区、彩色标签与固定保存栏样式。",
+  "app/common/dialogue.py": "用户画像和角色日记共享的纯对话正文清理。"
 }

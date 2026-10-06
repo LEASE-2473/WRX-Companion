@@ -1,0 +1,59 @@
+#userInfoPanel .dialog-scroll{display:flex;flex-direction:column;gap:14px}
+#userInfoPanel .dialog-scroll>label{background:#fff;border:1px solid #e1e7da;padding:16px;border-radius:14px}
+#userProfileEntries{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px}
+#userProfileEntries>.profile-tag{--tag-bg:#e9eefc;--tag-ink:#485e9b;--tag-border:#cbd6f3;min-width:0;max-width:100%;padding:0;border:0;background:transparent}
+#userProfileEntries>.profile-tag[data-color="1"]{--tag-bg:#f9e9ee;--tag-ink:#98516a;--tag-border:#efcbd8}
+#userProfileEntries>.profile-tag[data-color="2"]{--tag-bg:#e7f3ed;--tag-ink:#427862;--tag-border:#c7e3d5}
+#userProfileEntries>.profile-tag[data-color="3"]{--tag-bg:#f9efd9;--tag-ink:#8b6928;--tag-border:#eddbad}
+#userProfileEntries>.profile-tag[data-color="4"]{--tag-bg:#eee8f8;--tag-ink:#78569b;--tag-border:#dacbef}
+#userProfileEntries>.profile-tag[data-color="5"]{--tag-bg:#e4f2f5;--tag-ink:#3c7481;--tag-border:#bfe0e7}
+#userProfileEntries>.profile-tag>summary{display:block;list-style:none;max-width:100%;width:fit-content;box-sizing:border-box;cursor:pointer;font-size:13px;font-weight:600;line-height:1.5;padding:6px 13px;border-radius:999px;background:var(--tag-bg);color:var(--tag-ink);border:1px solid var(--tag-border);overflow-wrap:anywhere;transition:box-shadow .15s,filter .15s}
+#userProfileEntries>.profile-tag>summary::-webkit-details-marker{display:none}
+#userProfileEntries>.profile-tag>summary:hover{filter:brightness(.97)}
+#userProfileEntries>.profile-tag>summary:focus-visible{outline:2px solid var(--tag-ink);outline-offset:3px}
+#userProfileEntries>.profile-tag[open]{flex-basis:100%;order:1;background:#fff;border:1px solid var(--tag-border);padding:14px;border-radius:14px;box-sizing:border-box}
+#userProfileEntries>.profile-tag[open]>summary{box-shadow:0 0 0 2px var(--tag-bg);margin-bottom:12px}
+#userProfileEntries label{display:block;margin:12px 0}
+#userProfileCandidates details{padding:12px;border-bottom:1px solid var(--line)}
+#userProfileJobs{white-space:pre-wrap}
+#userInfoPanel .profile-transfer{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+#userInfoPanel .profile-transfer button{font-size:12px;padding:7px 12px;border-radius:8px}
+#userInfoPanel{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#34423c;width:min(720px,94vw)}
+#userInfoPanel .dialog-header{padding:18px 22px;border-bottom:1px solid #e1e8e2;background:#fafcf9}
+#userInfoPanel .dialog-header h2{font-size:20px;font-weight:650;letter-spacing:.02em}
+#userInfoPanel .dialog-scroll{padding:18px 22px;gap:16px;min-height:0;background:#f4f7f3}
+#userInfoPanel .dialog-scroll>*{flex-shrink:0}
+#userInfoPanel .profile-intro{display:flex;align-items:center;gap:9px;margin:0;font-size:12px;line-height:1.6;color:#69776f}
+#userInfoPanel .profile-global-badge{flex:none;border-radius:6px;padding:3px 7px;background:#e7efe3;color:#5c7350;font-weight:600;font-size:11px}
+#userInfoPanel .profile-section{background:#fff;border:1px solid #e0e7e0;border-radius:14px;padding:16px;display:grid;gap:12px}
+#userInfoPanel .profile-section-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+#userInfoPanel .profile-section-heading h3{margin:0;font-size:15px;line-height:1.5;font-weight:650;color:#354a3b}
+#userInfoPanel .profile-section-heading>span{font-size:11px;color:#7a897d}
+#userInfoPanel label{font-size:12px;line-height:1.6;font-weight:500;color:#617168;margin:0;display:grid;gap:6px}
+#userInfoPanel input:not([type="checkbox"]),#userInfoPanel textarea,#userInfoPanel select{font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;padding:9px 11px;border:1px solid #dce5dc;border-radius:9px;background:#f9fbf8;color:#34423c;box-sizing:border-box;width:100%}
+#userInfoPanel #userProfileCore{min-height:92px;height:92px;resize:vertical}
+#userInfoPanel .hint{font-size:12px;line-height:1.65;margin:0;color:#77837a}
+#userInfoPanel #addUserProfileEntry{font-size:12px;padding:5px 9px;min-height:30px;border:1px dashed #cbd9c6;background:#f5f9f2;border-radius:8px;color:#617b55;width:auto}
+#userInfoPanel .profile-fold{background:#fff;border:1px solid #e0e7e0;border-radius:12px;overflow:hidden}
+#userInfoPanel .profile-fold>summary{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;cursor:pointer;list-style:none;color:#3f5144;font-size:14px;font-weight:600;line-height:1.5}
+#userInfoPanel .profile-fold>summary::-webkit-details-marker{display:none}
+#userInfoPanel .profile-fold>summary::after{content:"";width:7px;height:7px;border-right:1.5px solid #7c8e78;border-bottom:1.5px solid #7c8e78;transform:rotate(45deg);flex:none;transition:transform .15s}
+#userInfoPanel .profile-fold[open]>summary::after{transform:rotate(225deg)}
+#userInfoPanel .profile-fold small{display:block;font-size:11px;line-height:1.6;font-weight:400;color:#849087;margin-top:3px}
+#userInfoPanel .profile-fold[open]>summary{border-bottom:1px solid #edf0eb}
+#userInfoPanel .profile-fold-body{padding:16px;display:grid;gap:14px;font-size:13px;line-height:1.65;color:#718077}
+#userInfoPanel .inline-check{display:flex;align-items:center;gap:8px;font-size:13px}
+#userInfoPanel .profile-prompt-fold>summary{display:inline-flex;align-items:center;gap:10px;box-sizing:border-box;min-height:34px;font-size:12px;font-weight:500;line-height:1.5;color:#63765b;cursor:pointer;padding:7px 12px;border:1px solid #d5dfcf;border-radius:8px;background:#f1f5ec;list-style:none;transition:background .15s,border-color .15s}
+#userInfoPanel .profile-prompt-fold>summary::-webkit-details-marker{display:none}
+#userInfoPanel .profile-prompt-fold>summary::after{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .15s}
+#userInfoPanel .profile-prompt-fold[open]>summary{background:#e8efdf;border-color:#bdcdb1}
+#userInfoPanel .profile-prompt-fold[open]>summary::after{transform:rotate(225deg)}
+#userInfoPanel .profile-prompt-fold>summary:hover{background:#e8efdf;border-color:#bdcdb1}
+#userInfoPanel .profile-prompt-fold>summary:focus-visible{outline:2px solid #7c956b;outline-offset:3px}
+#userInfoPanel .profile-prompt-fold label{margin-top:8px}
+#userInfoPanel .profile-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 22px;border-top:1px solid #e0e7e0;background:#fafcf9;flex-shrink:0}
+#userInfoPanel .profile-footer .hint{flex:1;min-width:0}
+#userInfoPanel #saveUserProfile{flex:none;font-size:13px;font-weight:600;padding:10px 20px;border-radius:10px}
+#userInfoPanel #userProfileEntries:empty::before{content:"还没有标签，添加一条让她更了解你。";font-size:12px;line-height:1.6;color:#8a968c;padding:4px 0}
+#userInfoPanel #userProfileEntries label{margin:10px 0}
+@media(max-width:760px){#userInfoPanel{width:100vw}#userInfoPanel .dialog-header{padding:16px}#userInfoPanel .dialog-scroll{padding:14px;gap:12px}#userInfoPanel .profile-footer{padding:12px 14px}#userInfoPanel .profile-section{padding:14px}#userInfoPanel .profile-intro{font-size:11px}#userInfoPanel input:not([type="checkbox"]),#userInfoPanel textarea,#userInfoPanel select{font-size:16px}}

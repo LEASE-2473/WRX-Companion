@@ -1,5 +1,22 @@
 // 2.0 文字主界面；复用 WRX 的配置编辑器与语音适配器。
 let activeTextRequest = null;
+function resizeChatInput() {
+  const input = $('textInput');
+  if (typeof getComputedStyle !== 'function') return;
+  const style = getComputedStyle(input);
+  const line = parseFloat(style.lineHeight);
+  const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  const maximum = line * 5 + padding + border;
+  input.style.height = 'auto';
+  const needed = input.scrollHeight + border;
+  input.style.height = `${Math.min(maximum, Math.max(line + padding + border, needed))}px`;
+  input.style.overflowY = needed > maximum ? 'auto' : 'hidden';
+}
+$('textInput').addEventListener('input', resizeChatInput);
+window.addEventListener('load', resizeChatInput);
+window.addEventListener('resize', resizeChatInput);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resizeChatInput).observe($('textInput').parentElement);
 $('stopText').addEventListener('click', async () => {
   const turn = activeTextRequest;
   if (!turn) return;
@@ -321,10 +338,10 @@ async function sendTypedText(override = null) {
       }
     });
     if (!completed) throw new Error('连接提前结束；服务端可能仍在生成，请刷新记录或重试');
-    if (!override) { $('textInput').value = ''; draftImages = []; renderDraftImages(); }
+    if (!override) { $('textInput').value = ''; resizeChatInput(); draftImages = []; renderDraftImages(); }
     pendingTextTurn = null; $('textInputState').textContent = 'Enter 发送 · Shift + Enter 换行'; status('Idle');
   } catch (error) {
-    if (override && !override.regenerate_mid && !override.resend_mid && !$('textInput').value.trim()) { $('textInput').value = content; draftImages = [...images]; renderDraftImages(); }
+    if (override && !override.regenerate_mid && !override.resend_mid && !$('textInput').value.trim()) { $('textInput').value = content; resizeChatInput(); draftImages = [...images]; renderDraftImages(); }
     $('textInputState').textContent = error.message === '已手动停止生成' ? '已停止，可继续发送；再次发送相同内容会复用请求。' : `${error.message}；再次发送相同内容会复用请求。`; status(error.message === '已手动停止生成' ? 'Idle' : 'Error');
   } finally {
     activeTextRequest = null; $('stopText').hidden = true;

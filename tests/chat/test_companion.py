@@ -463,9 +463,12 @@ def test_cannot_delete_role_bound_configuration():
 
 
 def test_streaming_voice_audio_and_text_persist_before_delivery(llm, monkeypatch):
+    llm.reply = '开头' + '长' * 43 + '<|next_message|>第二条。<|next_message|>第三条'
+    spoken = []
     async def pcm(self, texts, profile):
         async for text in texts:
             assert text.strip()
+            spoken.append(text)
             yield b'\0\0' * 32
     monkeypatch.setattr(companion_core.HttpTts, 'stream_pcm', pcm)
     async def scenario():
@@ -478,7 +481,26 @@ def test_streaming_voice_audio_and_text_persist_before_delivery(llm, monkeypatch
         assert job.events[-1]['type'] == 'complete'
         assert job.events[-1]['audio_streamed'] is True
         assert len(store.get_conversation(conversation.id).messages) == 2
+        assert store.get_conversation(conversation.id).messages[-1].content == llm.reply
+        assert ''.join(spoken).replace('\n', '') == llm.reply.replace('<|next_message|>', '')
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('chunk_size', range(1, 65))
+def test_tts_bubble_separator_survives_stream_chunk_boundaries(chunk_size):
+    from app.voice.pipeline import normalize_voice_reply, take_tts_segment
+    reply = '长' * 45 + '<|next_message|>' + '第二条。' + '<|next_message|>' + '末' * 55
+    buffer, spoken = '', []
+    for offset in range(0, len(reply), chunk_size):
+        buffer += reply[offset:offset + chunk_size]
+        while True:
+            segment, buffer = take_tts_segment(buffer)
+            if not segment:
+                break
+            spoken.append(normalize_voice_reply(segment))
+    spoken.append(normalize_voice_reply(buffer))
+    assert ''.join(spoken).replace('\n', '') == reply.replace('<|next_message|>', '')
+    assert all('<' not in text and 'next_message' not in text and '|>' not in text for text in spoken)
 
 
 def test_search_settings_key_not_returned():

@@ -20,7 +20,7 @@ def settings():
     return memory.settings().model_dump()
 
 @router.put('/settings')
-def save_settings(value: memory.Settings):
+async def save_settings(value: memory.Settings):
     try:
         if value.scope not in ('character','conversation'): raise ValueError('无效绑定')
         if value.llm_profile_id:
@@ -28,6 +28,8 @@ def save_settings(value: memory.Settings):
             get_profile('llm',value.llm_profile_id)
         memory.prompt_files.write('system',value.prompt)
         memory.store.save_setting('system_memory',value.model_dump(exclude={'prompt'}))
+        if value.auto_cold_mode == 'immediate':
+            memory.schedule_all_cold(force=True)
         return value.model_dump()
     except (ValueError,KeyError) as exc: raise api_error(exc)
 
@@ -87,7 +89,7 @@ async def mode(character_id: str,rid: str,value: ModeInput):
     except Exception as exc: raise api_error(ValueError(str(exc)))
 
 @router.put('/{character_id}/{rid}')
-def edit(character_id: str,rid: str,conversation_id: str,value: memory.Data):
+async def edit(character_id: str,rid: str,conversation_id: str,value: memory.Data):
     try:
         row=next((r for r in memory.rows(character_id,conversation_id) if r['id']==rid),None)
         if not row: raise KeyError(rid)
@@ -99,6 +101,8 @@ def edit(character_id: str,rid: str,conversation_id: str,value: memory.Data):
         with memory.store.database() as db:
             table,sequence=memory.schema.locate(rid)
             db.execute(f'UPDATE {table} SET '+','.join(k+'=?' for k in fields)+",mode='hot',vector=NULL,vector_signature='' WHERE sequence=? AND character_id=?",[*fields.values(),sequence,character_id])
+        if memory.settings().auto_cold_mode == 'immediate':
+            memory.schedule_cold(character_id, conversation_id, force=True)
         return {'status':'done'}
     except (ValueError,KeyError) as exc: raise api_error(exc)
 
